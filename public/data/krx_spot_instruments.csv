@@ -1,0 +1,5 @@
+marketType,assetType,name,code,displayName,exchange,sector,initialConsonants,aliases,isActive
+spot,stock,삼성전자,005930,삼성전자,KOSPI,반도체,ㅅㅅㅈㅈ,삼전|samsung,true
+spot,stock,SK하이닉스,000660,SK하이닉스,KOSPI,반도체,ㅅㅋㅎㅇㄴㅅ,하이닉스|hynix,true
+spot,stock,현대차,005380,현대차,KOSPI,자동차,ㅎㄷㅊ,현대자동차|hyundai,true
+spot,etf,KODEX 200,069500,KODEX 200,ETF,국내지수 ETF,ㅋㄷㅅ,코덱스200|kodex,true

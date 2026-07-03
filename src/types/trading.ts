@@ -1,0 +1,83 @@
+export type MarketType = "spot" | "futures";
+export type MarketFilter = "all" | MarketType;
+export type AssetType = "stock" | "etf" | "etn" | "index_futures" | "stock_futures";
+export type PositionSide = "long" | "short";
+export type TradeAction = "entry" | "exit" | "entry_exit";
+export type EmotionTag = "confidence" | "anxiety" | "impatience" | "greed" | "fear" | "calm" | "regret" | "conviction";
+
+export interface Instrument {
+  id: string;
+  marketType: MarketType;
+  assetType: AssetType;
+  name: string;
+  code: string;
+  displayName: string;
+  exchange: string;
+  sector?: string;
+  initialConsonants: string;
+  aliases: string[];
+  multiplier?: number;
+  tickSize?: number;
+  tickValue?: number;
+  feeRate?: number;
+  contractMonth?: string;
+  expiryDate?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Trade {
+  id: string;
+  tradeDate: string;
+  marketType: MarketType;
+  assetType: AssetType;
+  instrumentId: string;
+  instrumentName: string;
+  instrumentCode: string;
+  positionSide: PositionSide;
+  tradeAction: TradeAction;
+  entryDate?: string;
+  entryPrice: number;
+  exitDate?: string;
+  exitPrice?: number;
+  quantity?: number;
+  contractCount?: number;
+  multiplier?: number;
+  tradeAmount: number;
+  fee: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  cumulativePnl: number;
+  marketCumulativePnl: number;
+  returnRate: number;
+  entryReason: string;
+  exitReason: string;
+  targetPrice?: number;
+  emotionTags: EmotionTag[];
+  reviewMemo: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountRecord {
+  id: string;
+  recordDate: string;
+  totalAsset: number;
+  cash: number;
+  spotEvaluationAmount: number;
+  futuresMargin: number;
+  futuresEvaluationAmount: number;
+  unrealizedPnl: number;
+  realizedPnl: number;
+  deposit: number;
+  withdrawal: number;
+  memo: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DateRange {
+  from: string;
+  to: string;
+}
