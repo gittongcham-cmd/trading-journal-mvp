@@ -1,10 +1,12 @@
 "use client";
 
 import { withCumulativePnl } from "@/lib/calculations";
-import type { AccountRecord, EmotionTag, Trade } from "@/types/trading";
+import { withBalanceComparisons } from "@/lib/accountBalances";
+import type { AccountBalanceSnapshot, AccountRecord, EmotionTag, Trade } from "@/types/trading";
 
 const TRADES_KEY = "trading-journal-trades-v2-empty-start";
 const ACCOUNTS_KEY = "trading-journal-accounts-v2-empty-start";
+const BALANCE_SNAPSHOTS_KEY = "trading-journal-account-balance-snapshots-v1";
 
 export function loadTrades(): Trade[] {
   if (typeof window === "undefined") return [];
@@ -36,6 +38,31 @@ export function loadAccountRecords(): AccountRecord[] {
   } catch {
     return [];
   }
+}
+
+export function loadAccountBalanceSnapshots(): AccountBalanceSnapshot[] {
+  if (typeof window === "undefined") return [];
+  const raw = window.localStorage.getItem(BALANCE_SNAPSHOTS_KEY);
+  if (!raw) return [];
+  try {
+    return (JSON.parse(raw) as AccountBalanceSnapshot[])
+      .map(normalizeBalanceSnapshot)
+      .sort((a, b) => a.recordDate.localeCompare(b.recordDate));
+  } catch {
+    return [];
+  }
+}
+
+export function saveAccountBalanceSnapshots(snapshots: AccountBalanceSnapshot[]): void {
+  window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(snapshots.sort((a, b) => a.recordDate.localeCompare(b.recordDate))));
+}
+
+export function addAccountBalanceSnapshot(snapshot: AccountBalanceSnapshot): AccountBalanceSnapshot[] {
+  const existing = loadAccountBalanceSnapshots();
+  const next = [...existing, withBalanceComparisons(snapshot, existing)].sort((a, b) => a.recordDate.localeCompare(b.recordDate));
+  const recalculated = next.map((item, index) => withBalanceComparisons(item, next.slice(0, index)));
+  saveAccountBalanceSnapshots(recalculated);
+  return recalculated;
 }
 
 function normalizeTrade(trade: Partial<Trade>): Trade {
@@ -72,5 +99,35 @@ function normalizeTrade(trade: Partial<Trade>): Trade {
     reviewMemo: trade.reviewMemo ?? "",
     createdAt: trade.createdAt ?? now,
     updatedAt: trade.updatedAt ?? now
+  };
+}
+
+function normalizeBalanceSnapshot(snapshot: Partial<AccountBalanceSnapshot>): AccountBalanceSnapshot {
+  const now = new Date().toISOString();
+  const id = snapshot.id ?? `snapshot-${Date.now()}`;
+  const items = (snapshot.items ?? []).map((item) => ({
+    id: item.id ?? `item-${Date.now()}`,
+    snapshotId: item.snapshotId ?? id,
+    bankName: item.bankName ?? "",
+    accountNumber: item.accountNumber,
+    accountName: item.accountName ?? "",
+    amount: Number(item.amount ?? 0),
+    memo: item.memo ?? "",
+    createdAt: item.createdAt ?? now,
+    updatedAt: item.updatedAt ?? now
+  }));
+  const totalBalance = snapshot.totalBalance ?? items.reduce((sum, item) => sum + item.amount, 0);
+  return {
+    id,
+    recordDate: snapshot.recordDate ?? "2026-07-03",
+    totalBalance,
+    previousRecordChangeAmount: snapshot.previousRecordChangeAmount,
+    previousRecordChangeRate: snapshot.previousRecordChangeRate,
+    previousMonthChangeAmount: snapshot.previousMonthChangeAmount,
+    previousMonthChangeRate: snapshot.previousMonthChangeRate,
+    memo: snapshot.memo ?? "",
+    items,
+    createdAt: snapshot.createdAt ?? now,
+    updatedAt: snapshot.updatedAt ?? now
   };
 }

@@ -69,3 +69,28 @@ create table if not exists account_records (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+create table if not exists account_balance_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  record_date date not null,
+  total_balance numeric not null,
+  previous_record_change_amount numeric,
+  previous_record_change_rate numeric,
+  previous_month_change_amount numeric,
+  previous_month_change_rate numeric,
+  memo text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists account_balance_items (
+  id uuid primary key default gen_random_uuid(),
+  snapshot_id uuid not null references account_balance_snapshots(id) on delete cascade,
+  bank_name text not null,
+  account_number text,
+  account_name text,
+  amount numeric not null,
+  memo text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);

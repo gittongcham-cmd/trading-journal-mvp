@@ -77,6 +77,32 @@ export interface AccountRecord {
   updatedAt: string;
 }
 
+export interface AccountBalanceItem {
+  id: string;
+  snapshotId: string;
+  bankName: string;
+  accountNumber?: string;
+  accountName: string;
+  amount: number;
+  memo: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountBalanceSnapshot {
+  id: string;
+  recordDate: string;
+  totalBalance: number;
+  previousRecordChangeAmount?: number;
+  previousRecordChangeRate?: number;
+  previousMonthChangeAmount?: number;
+  previousMonthChangeRate?: number;
+  memo: string;
+  items: AccountBalanceItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DateRange {
   from: string;
   to: string;

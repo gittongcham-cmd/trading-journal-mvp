@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatKRW, formatNumber, formatPercent, pnlClass } from "@/lib/format";
-import { loadAccountRecords, loadTrades } from "@/lib/store";
-import type { AccountRecord, EmotionTag, Trade } from "@/types/trading";
+import { loadAccountBalanceSnapshots, loadTrades } from "@/lib/store";
+import type { AccountBalanceSnapshot, EmotionTag, Trade } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 
@@ -21,8 +21,8 @@ const emotionLabels: Record<EmotionTag, string> = {
 
 export function StatsPage() {
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [accounts, setAccounts] = useState<AccountRecord[]>([]);
-  useEffect(() => { setTrades(loadTrades()); setAccounts(loadAccountRecords()); }, []);
+  const [accounts, setAccounts] = useState<AccountBalanceSnapshot[]>([]);
+  useEffect(() => { setTrades(loadTrades()); setAccounts(loadAccountBalanceSnapshots()); }, []);
 
   const closed = trades.filter((trade) => trade.realizedPnl !== 0);
   const profits = closed.filter((trade) => trade.realizedPnl > 0);
@@ -34,11 +34,11 @@ export function StatsPage() {
   const spotPnl = trades.filter((trade) => trade.marketType === "spot").reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const futuresPnl = trades.filter((trade) => trade.marketType === "futures").reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const maxDrawdown = useMemo(() => {
-    let peak = accounts[0]?.totalAsset ?? 0;
+    let peak = accounts[0]?.totalBalance ?? 0;
     let drawdown = 0;
     accounts.forEach((account) => {
-      peak = Math.max(peak, account.totalAsset);
-      drawdown = Math.min(drawdown, account.totalAsset - peak);
+      peak = Math.max(peak, account.totalBalance);
+      drawdown = Math.min(drawdown, account.totalBalance - peak);
     });
     return drawdown;
   }, [accounts]);
@@ -79,7 +79,7 @@ export function StatsPage() {
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <Chart title="월별 손익"><BarChart data={monthly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl">{monthly.map((item) => <Cell key={item.name} fill={item.pnl >= 0 ? "#dc2626" : "#2563eb"} />)}</Bar></BarChart></Chart>
         <Chart title="요일별 성과"><BarChart data={weekday}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl" fill="#475569" /></BarChart></Chart>
-        <Chart title="누적 자산곡선"><AreaChart data={accounts}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="recordDate" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Area dataKey="totalAsset" stroke="#0f172a" fill="#dbeafe" /></AreaChart></Chart>
+        <Chart title="누적 자산곡선"><AreaChart data={accounts}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="recordDate" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Area dataKey="totalBalance" stroke="#0f172a" fill="#dbeafe" /></AreaChart></Chart>
         <Chart title="현물/선물별 손익 비중"><PieChart><Pie data={byMarket} dataKey="value" nameKey="name" outerRadius={90} label><Cell fill="#ef4444" /><Cell fill="#2563eb" /></Pie><Tooltip formatter={(value) => formatKRW(Number(value))} /></PieChart></Chart>
         <Chart title="상품/전략별 손익 비중"><BarChart data={byInstrument}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl" fill="#0f766e" /></BarChart></Chart>
       </div>

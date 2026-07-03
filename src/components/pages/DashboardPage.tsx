@@ -3,23 +3,26 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { sumNegative, sumPositive } from "@/lib/accountBalances";
 import { calculateWinRate } from "@/lib/calculations";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
-import { loadAccountRecords, loadTrades } from "@/lib/store";
-import type { AccountRecord, Trade } from "@/types/trading";
+import { loadAccountBalanceSnapshots, loadTrades } from "@/lib/store";
+import type { AccountBalanceSnapshot, Trade } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
 
 export function DashboardPage() {
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [accounts, setAccounts] = useState<AccountRecord[]>([]);
+  const [accounts, setAccounts] = useState<AccountBalanceSnapshot[]>([]);
   const [range, setRange] = useState("30일");
 
   useEffect(() => {
     setTrades(loadTrades());
-    setAccounts(loadAccountRecords());
+    setAccounts(loadAccountBalanceSnapshots());
   }, []);
 
   const latest = accounts[accounts.length - 1];
+  const latestPositive = latest ? sumPositive(latest.items) : 0;
+  const latestNegative = latest ? sumNegative(latest.items) : 0;
   const today = "2026-07-03";
   const todayTrades = trades.filter((trade) => trade.tradeDate === today);
   const totalPnl = sumPnl(trades);
@@ -28,8 +31,8 @@ export function DashboardPage() {
   const todayTotalPnl = sumPnl(todayTrades, true);
   const todaySpotPnl = sumPnl(todayTrades.filter((trade) => trade.marketType === "spot"), true);
   const todayFuturesPnl = sumPnl(todayTrades.filter((trade) => trade.marketType === "futures"), true);
-  const initialAsset = accounts[0]?.totalAsset ?? 1;
-  const cumulativeReturn = latest ? ((latest.totalAsset - initialAsset) / initialAsset) * 100 : 0;
+  const initialAsset = accounts[0]?.totalBalance ?? 1;
+  const cumulativeReturn = latest ? ((latest.totalBalance - initialAsset) / initialAsset) * 100 : 0;
   const positions = trades.filter((trade) => trade.tradeAction === "entry");
 
   const dailyPnl = useMemo(() => {
@@ -49,7 +52,7 @@ export function DashboardPage() {
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-black text-slate-950">대시보드</h1>
-          <p className="mt-1 text-sm text-slate-500">현물과 선물 성과를 분리해서 보는 통합 매매 현황입니다.</p>
+          <p className="mt-1 text-sm text-slate-500">수기 등록한 계좌 잔고와 매매일지 성과를 분리해서 봅니다.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input className="input max-w-40" type="date" defaultValue="2026-06-28" />
@@ -59,11 +62,24 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
-        <KpiCard label="총자산" value={formatKRW(latest?.totalAsset ?? 0)} icon="₩" />
-        <KpiCard label="예수금" value={formatKRW(latest?.cash ?? 0)} icon="C" />
-        <KpiCard label="현물 평가금액" value={formatKRW(latest?.spotEvaluationAmount ?? 0)} icon="S" />
-        <KpiCard label="선물 증거금" value={formatKRW(latest?.futuresMargin ?? 0)} icon="F" />
+      <section>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-black text-slate-950">내 자산</h2>
+          <Link className="btn btn-secondary" href="/account-records/new">+ 계좌 잔고 등록</Link>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <KpiCard label="최신 총 잔고" value={formatKRW(latest?.totalBalance ?? 0)} tone="pnl" icon="₩" />
+          <KpiCard label="직전 기록 대비" value={formatChange(latest?.previousRecordChangeAmount, latest?.previousRecordChangeRate)} tone="pnl" icon="R" />
+          <KpiCard label="전달 대비" value={formatChange(latest?.previousMonthChangeAmount, latest?.previousMonthChangeRate)} tone="pnl" icon="M" />
+          <KpiCard label="플러스 잔고 합계" value={formatKRW(latestPositive)} icon="+" />
+          <KpiCard label="마이너스 잔고 합계" value={formatKRW(latestNegative)} tone="pnl" icon="-" />
+          <KpiCard label="계좌 개수" value={`${latest?.items.length ?? 0}개`} icon="A" />
+        </div>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-lg font-black text-slate-950">매매 성과</h2>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <KpiCard label="오늘 전체 손익" value={formatKRW(todayTotalPnl)} tone="pnl" icon="D" />
         <KpiCard label="오늘 현물 손익" value={formatKRW(todaySpotPnl)} tone="pnl" icon="S" />
         <KpiCard label="오늘 선물 손익" value={formatKRW(todayFuturesPnl)} tone="pnl" icon="F" />
@@ -72,7 +88,8 @@ export function DashboardPage() {
         <KpiCard label="선물 누적수익" value={formatKRW(futuresPnl)} tone="pnl" icon="F" />
         <KpiCard label="누적 수익률" value={formatPercent(cumulativeReturn)} icon="%" />
         <KpiCard label="승률" value={formatPercent(calculateWinRate(trades))} icon="W" />
-      </div>
+        </div>
+      </section>
 
       <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
         <section className="card p-5">
@@ -126,7 +143,7 @@ export function DashboardPage() {
               <XAxis dataKey="recordDate" />
               <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000000)}백만`} />
               <Tooltip formatter={(value) => formatKRW(Number(value))} />
-              <Area dataKey="totalAsset" stroke="#2563eb" fill="#dbeafe" name="총자산" />
+              <Area dataKey="totalBalance" stroke="#2563eb" fill="#dbeafe" name="총 잔고" />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -189,6 +206,12 @@ export function DashboardPage() {
 
 function sumPnl(trades: Trade[], includeUnrealized = false): number {
   return trades.reduce((sum, trade) => sum + trade.realizedPnl + (includeUnrealized ? trade.unrealizedPnl : 0), 0);
+}
+
+function formatChange(amount?: number, rate?: number): string {
+  if (amount === undefined || rate === undefined) return "비교 데이터 없음";
+  const sign = amount > 0 ? "+" : "";
+  return `${sign}${formatKRW(amount)} / ${sign}${formatPercent(rate)}`;
 }
 
 function ChartCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
