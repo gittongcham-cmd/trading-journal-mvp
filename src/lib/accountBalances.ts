@@ -37,7 +37,8 @@ export function findPreviousMonthRecord(snapshots: AccountBalanceSnapshot[], rec
 }
 
 export function changeRate(changeAmount: number, base?: number): number | undefined {
-  if (!base) return undefined;
+  if (base === undefined) return undefined;
+  if (base === 0) return 0;
   return (changeAmount / base) * 100;
 }
 

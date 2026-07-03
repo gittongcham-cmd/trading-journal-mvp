@@ -54,15 +54,37 @@ export function loadAccountBalanceSnapshots(): AccountBalanceSnapshot[] {
 }
 
 export function saveAccountBalanceSnapshots(snapshots: AccountBalanceSnapshot[]): void {
-  window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(snapshots.sort((a, b) => a.recordDate.localeCompare(b.recordDate))));
+  window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(recalculateBalanceSnapshots(snapshots)));
 }
 
 export function addAccountBalanceSnapshot(snapshot: AccountBalanceSnapshot): AccountBalanceSnapshot[] {
   const existing = loadAccountBalanceSnapshots();
-  const next = [...existing, withBalanceComparisons(snapshot, existing)].sort((a, b) => a.recordDate.localeCompare(b.recordDate));
-  const recalculated = next.map((item, index) => withBalanceComparisons(item, next.slice(0, index)));
-  saveAccountBalanceSnapshots(recalculated);
-  return recalculated;
+  const next = recalculateBalanceSnapshots([...existing, snapshot]);
+  window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(next));
+  return next;
+}
+
+export function updateAccountBalanceSnapshot(snapshot: AccountBalanceSnapshot): AccountBalanceSnapshot[] {
+  const existing = loadAccountBalanceSnapshots();
+  const next = recalculateBalanceSnapshots(existing.map((item) => item.id === snapshot.id ? snapshot : item));
+  saveAccountBalanceSnapshots(next);
+  return next;
+}
+
+export function deleteAccountBalanceSnapshot(id: string): AccountBalanceSnapshot[] {
+  const next = recalculateBalanceSnapshots(loadAccountBalanceSnapshots().filter((snapshot) => snapshot.id !== id));
+  saveAccountBalanceSnapshots(next);
+  return next;
+}
+
+function recalculateBalanceSnapshots(snapshots: AccountBalanceSnapshot[]): AccountBalanceSnapshot[] {
+  return snapshots
+    .map((snapshot) => ({
+      ...snapshot,
+      totalBalance: snapshot.items.reduce((sum, item) => sum + item.amount, 0)
+    }))
+    .sort((a, b) => a.recordDate.localeCompare(b.recordDate))
+    .map((snapshot, index, sorted) => withBalanceComparisons(snapshot, sorted.slice(0, index)));
 }
 
 function normalizeTrade(trade: Partial<Trade>): Trade {

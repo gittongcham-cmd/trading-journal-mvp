@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { maskAccountNumber, sumNegative, sumPositive } from "@/lib/accountBalances";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
-import { loadAccountBalanceSnapshots } from "@/lib/store";
+import { deleteAccountBalanceSnapshot, loadAccountBalanceSnapshots } from "@/lib/store";
 import type { AccountBalanceSnapshot } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
 
@@ -24,6 +24,14 @@ export function AccountsPage() {
   const negativeBalance = latest ? sumNegative(latest.items) : 0;
   const monthlyData = useMemo(() => records.map((record) => ({ date: record.recordDate, change: record.previousMonthChangeAmount ?? 0 })), [records]);
   const donutData = latest?.items.map((item) => ({ name: item.accountName || item.bankName, value: Math.abs(item.amount), raw: item.amount })) ?? [];
+
+  function deleteRecord(id: string) {
+    const ok = window.confirm("이 계좌 잔고 기록을 삭제할까요? 삭제 후에는 이후 기록의 증감률이 다시 계산됩니다.");
+    if (!ok) return;
+    const next = deleteAccountBalanceSnapshot(id);
+    setRecords(next);
+    setSelected(next[next.length - 1] ?? null);
+  }
 
   return (
     <div className="space-y-5">
@@ -80,7 +88,7 @@ export function AccountsPage() {
         <div className="overflow-x-auto">
           <table className="min-w-[1100px] w-full text-sm">
             <thead className="bg-slate-50 text-xs font-bold text-slate-500">
-              <tr>{["기록일", "총 잔고", "플러스 잔고", "마이너스 잔고", "직전 기록 대비", "전달 대비", "계좌 개수", "메모", "상세보기"].map((head, index) => <th key={head} className={`px-4 py-3 ${index > 0 && index < 7 ? "text-right" : "text-left"}`}>{head}</th>)}</tr>
+              <tr>{["기록일", "총 잔고", "플러스 잔고", "마이너스 잔고", "직전 기록 대비", "전달 대비", "계좌 개수", "메모", "액션"].map((head, index) => <th key={head} className={`px-4 py-3 ${index > 0 && index < 7 ? "text-right" : "text-left"}`}>{head}</th>)}</tr>
             </thead>
             <tbody>
               {records.slice().reverse().map((record) => {
@@ -96,7 +104,13 @@ export function AccountsPage() {
                     <td className={`px-4 py-3 text-right font-bold ${pnlClass(record.previousMonthChangeAmount ?? 0)}`}>{formatChange(record.previousMonthChangeAmount, record.previousMonthChangeRate)}</td>
                     <td className="px-4 py-3 text-right">{record.items.length}개</td>
                     <td className="px-4 py-3">{record.memo || "-"}</td>
-                    <td className="px-4 py-3"><button className="btn btn-secondary" type="button" onClick={() => setSelected(record)}>상세보기</button></td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        <button className="btn btn-secondary" type="button" onClick={() => setSelected(record)}>상세보기</button>
+                        <Link className="btn btn-secondary" href={`/account-records/${record.id}/edit`}>수정</Link>
+                        <button className="btn btn-secondary text-blue-600" type="button" onClick={() => deleteRecord(record.id)}>삭제</button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
