@@ -103,6 +103,27 @@ export interface AccountBalanceSnapshot {
   updatedAt: string;
 }
 
+export interface InstrumentPrice {
+  instrumentId: string;
+  instrumentCode: string;
+  instrumentName: string;
+  currentPrice: number;
+  updatedAt: string;
+}
+
+export interface SpotHoldingSummary {
+  instrumentId: string;
+  instrumentName: string;
+  instrumentCode: string;
+  quantity: number;
+  averageEntryPrice: number;
+  investmentAmount: number;
+  currentPrice?: number;
+  currentAmount?: number;
+  valuationPnl?: number;
+  valuationReturnRate?: number;
+}
+
 export interface DateRange {
   from: string;
   to: string;

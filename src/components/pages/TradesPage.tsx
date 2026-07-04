@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { calculateWinRate } from "@/lib/calculations";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
-import { loadTrades } from "@/lib/store";
-import type { MarketFilter, Trade } from "@/types/trading";
+import { calculateSpotHoldings, summarizeSpotHoldings } from "@/lib/holdings";
+import { loadInstrumentPrices, loadTrades, saveInstrumentPrice } from "@/lib/store";
+import type { InstrumentPrice, MarketFilter, Trade } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
 
 export function TradesPage() {
@@ -13,11 +14,15 @@ export function TradesPage() {
   const [market, setMarket] = useState<MarketFilter>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Trade | null>(null);
+  const [prices, setPrices] = useState<Record<string, InstrumentPrice>>({});
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [priceDraft, setPriceDraft] = useState("");
 
   useEffect(() => {
     const loaded = loadTrades();
     setTrades(loaded);
     setSelected(loaded[0] ?? null);
+    setPrices(loadInstrumentPrices());
   }, []);
 
   const filtered = useMemo(
@@ -28,6 +33,28 @@ export function TradesPage() {
   const spotPnl = filtered.filter((trade) => trade.marketType === "spot").reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const futuresPnl = filtered.filter((trade) => trade.marketType === "futures").reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const average = realized / Math.max(filtered.length, 1);
+  const spotHoldings = useMemo(() => calculateSpotHoldings(trades, prices), [trades, prices]);
+  const holdingsSummary = useMemo(() => summarizeSpotHoldings(spotHoldings), [spotHoldings]);
+
+  function beginPriceEdit(holding: { instrumentId: string; currentPrice?: number }) {
+    setEditingPriceId(holding.instrumentId);
+    setPriceDraft(holding.currentPrice ? holding.currentPrice.toLocaleString("ko-KR") : "");
+  }
+
+  function savePrice(holding: { instrumentId: string; instrumentCode: string; instrumentName: string }) {
+    const currentPrice = Number(priceDraft.replace(/,/g, ""));
+    if (!currentPrice) return;
+    const next = saveInstrumentPrice({
+      instrumentId: holding.instrumentId,
+      instrumentCode: holding.instrumentCode,
+      instrumentName: holding.instrumentName,
+      currentPrice,
+      updatedAt: new Date().toISOString()
+    });
+    setPrices(next);
+    setEditingPriceId(null);
+    setPriceDraft("");
+  }
 
   return (
     <div className="space-y-5">
@@ -59,14 +86,74 @@ export function TradesPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <KpiCard label="총 거래수" value={`${filtered.length}건`} />
         <KpiCard label="실현손익" value={formatKRW(realized)} tone="pnl" />
         <KpiCard label="현물 누적수익" value={formatKRW(spotPnl)} tone="pnl" />
         <KpiCard label="선물 누적수익" value={formatKRW(futuresPnl)} tone="pnl" />
+        <KpiCard label="총 투자금액" value={formatKRW(holdingsSummary.totalInvestmentAmount)} />
+        <KpiCard label="보유 종목 현재금액" value={formatKRW(holdingsSummary.totalCurrentAmount)} />
+        <KpiCard label="평가손익" value={formatKRW(holdingsSummary.valuationPnl)} tone="pnl" />
+        <KpiCard label="평가수익률" value={formatPercent(holdingsSummary.valuationReturnRate)} tone="pnl" />
         <KpiCard label="평균 손익" value={formatKRW(average)} tone="pnl" />
         <KpiCard label="승률" value={formatPercent(calculateWinRate(filtered))} />
       </div>
+
+      <section className="card overflow-hidden">
+        <div className="border-b border-slate-100 p-5">
+          <h2 className="text-lg font-black">현재 보유 현물 종목</h2>
+          <p className="mt-1 text-sm text-slate-500">현물 주식/ETF/ETN 보유 포지션만 기준으로 평가합니다. 선물은 포함하지 않습니다.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-[1120px] w-full text-sm">
+            <thead className="bg-slate-50 text-xs font-bold text-slate-500">
+              <tr>
+                {["종목명", "종목코드", "보유수량", "평균매수가", "투자금액", "현재가", "현재금액", "평가손익", "평가수익률"].map((head, index) => (
+                  <th key={head} className={`px-4 py-3 ${index >= 2 ? "text-right" : "text-left"}`}>{head}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {spotHoldings.length === 0 && (
+                <tr><td className="px-4 py-6 text-center text-sm font-semibold text-slate-500" colSpan={9}>현재 보유 중인 현물 종목이 없습니다.</td></tr>
+              )}
+              {spotHoldings.map((holding) => (
+                <tr key={holding.instrumentId} className="border-t border-slate-100">
+                  <td className="px-4 py-3 font-bold">{holding.instrumentName}</td>
+                  <td className="px-4 py-3">{holding.instrumentCode}</td>
+                  <td className="px-4 py-3 text-right">{holding.quantity.toLocaleString("ko-KR")}주</td>
+                  <td className="px-4 py-3 text-right">{formatKRW(holding.averageEntryPrice)}</td>
+                  <td className="px-4 py-3 text-right">{formatKRW(holding.investmentAmount)}</td>
+                  <td className="px-4 py-3 text-right">
+                    {editingPriceId === holding.instrumentId ? (
+                      <div className="flex justify-end gap-2">
+                        <input
+                          className="input max-w-36 text-right"
+                          value={priceDraft}
+                          onChange={(event) => setPriceDraft(formatNumberInput(event.target.value))}
+                          placeholder="현재가"
+                        />
+                        <button className="btn btn-primary" type="button" onClick={() => savePrice(holding)}>저장</button>
+                      </div>
+                    ) : (
+                      <button className="font-bold text-blue-600 underline-offset-2 hover:underline" type="button" onClick={() => beginPriceEdit(holding)}>
+                        {holding.currentPrice === undefined ? "현재가 입력 필요" : `${holding.currentPrice.toLocaleString("ko-KR")}원`}
+                      </button>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">{holding.currentAmount === undefined ? "-" : formatKRW(holding.currentAmount)}</td>
+                  <td className={`px-4 py-3 text-right font-black ${holding.valuationPnl === undefined ? "text-slate-400" : pnlClass(holding.valuationPnl)}`}>
+                    {holding.valuationPnl === undefined ? "-" : formatKRW(holding.valuationPnl)}
+                  </td>
+                  <td className={`px-4 py-3 text-right font-black ${holding.valuationReturnRate === undefined ? "text-slate-400" : pnlClass(holding.valuationReturnRate)}`}>
+                    {holding.valuationReturnRate === undefined ? "-" : formatPercent(holding.valuationReturnRate)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
@@ -148,4 +235,10 @@ function Detail({ label, value, className = "", alignRight = false }: { label: s
 
 function Memo({ label, value }: { label: string; value: string }) {
   return <div className="rounded-xl bg-slate-50 p-4"><div className="label">{label}</div><div className="mt-2 text-sm font-semibold text-slate-700">{value}</div></div>;
+}
+
+function formatNumberInput(value: string): string {
+  const cleaned = value.replace(/[^0-9]/g, "");
+  if (!cleaned) return "";
+  return Number(cleaned).toLocaleString("ko-KR");
 }

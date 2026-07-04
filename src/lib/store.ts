@@ -2,11 +2,12 @@
 
 import { withCumulativePnl } from "@/lib/calculations";
 import { withBalanceComparisons } from "@/lib/accountBalances";
-import type { AccountBalanceSnapshot, AccountRecord, EmotionTag, Trade } from "@/types/trading";
+import type { AccountBalanceSnapshot, AccountRecord, EmotionTag, InstrumentPrice, Trade } from "@/types/trading";
 
 const TRADES_KEY = "trading-journal-trades-v2-empty-start";
 const ACCOUNTS_KEY = "trading-journal-accounts-v2-empty-start";
 const BALANCE_SNAPSHOTS_KEY = "trading-journal-account-balance-snapshots-v1";
+const INSTRUMENT_PRICES_KEY = "trading-journal-instrument-prices-v1";
 
 export function loadTrades(): Trade[] {
   if (typeof window === "undefined") return [];
@@ -26,6 +27,24 @@ export function saveTrades(trades: Trade[]): void {
 export function addTrade(trade: Trade): Trade[] {
   const next = withCumulativePnl([...loadTrades(), trade]);
   saveTrades(next);
+  return next;
+}
+
+export function loadInstrumentPrices(): Record<string, InstrumentPrice> {
+  if (typeof window === "undefined") return {};
+  const raw = window.localStorage.getItem(INSTRUMENT_PRICES_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, InstrumentPrice>;
+  } catch {
+    return {};
+  }
+}
+
+export function saveInstrumentPrice(price: InstrumentPrice): Record<string, InstrumentPrice> {
+  const current = loadInstrumentPrices();
+  const next = { ...current, [price.instrumentId]: price };
+  window.localStorage.setItem(INSTRUMENT_PRICES_KEY, JSON.stringify(next));
   return next;
 }
 
