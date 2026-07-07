@@ -424,9 +424,13 @@ function ChartPanel({ title, description, children }: { title: string; descripti
 
 function TopBar({ title, rows, positive = false }: { title: string; rows: PositionHoldingSummary[]; positive?: boolean }) {
   const data = rows.map((position) => ({ name: position.instrumentName, pnl: position.unrealizedPnl ?? 0, abs: Math.abs(position.unrealizedPnl ?? 0) }));
-  return <div><div className="mb-2 text-sm font-black text-slate-700">{title}</div>{data.length ? <ResponsiveContainer width="100%" height={220}><BarChart data={data} layout="vertical" margin={{ left: 10, right: 32 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" hide /><YAxis dataKey="name" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(_value, _name, item) => formatKRW(Number(item.payload.pnl))} /><Bar dataKey="abs" fill={positive ? "#ef4444" : "#3b82f6"} label={(props) => {
-    const payload = props.payload as { pnl: number };
-    return <text x={Number(props.x) + Number(props.width) + 6} y={Number(props.y) + Number(props.height) / 2 + 4} fontSize={11} fontWeight={700} fill={positive ? "#ef4444" : "#3b82f6"}>{formatKRW(payload.pnl)}</text>;
+  return <div><div className="mb-2 text-sm font-black text-slate-700">{title}</div>{data.length ? <ResponsiveContainer width="100%" height={220}><BarChart data={data} layout="vertical" margin={{ left: 10, right: 32 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" hide /><YAxis dataKey="name" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(_value, _name, item) => formatKRW(Number((item.payload as { pnl?: number } | undefined)?.pnl ?? 0))} /><Bar dataKey="abs" fill={positive ? "#ef4444" : "#3b82f6"} label={(props) => {
+    const payload = props.payload as { pnl?: number } | undefined;
+    const x = Number(props.x ?? 0);
+    const y = Number(props.y ?? 0);
+    const width = Number(props.width ?? 0);
+    const height = Number(props.height ?? 0);
+    return <text x={x + width + 6} y={y + height / 2 + 4} fontSize={11} fontWeight={700} fill={positive ? "#ef4444" : "#3b82f6"}>{formatKRW(payload?.pnl ?? 0)}</text>;
   }} /></BarChart></ResponsiveContainer> : <div className="rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">표시할 종목이 아직 없습니다.</div>}</div>;
 }
 
