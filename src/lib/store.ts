@@ -45,7 +45,7 @@ export function loadInstrumentPrices(): Record<string, InstrumentPrice> {
 
 export function saveInstrumentPrice(price: InstrumentPrice): Record<string, InstrumentPrice> {
   const current = loadInstrumentPrices();
-  const next = { ...current, [price.instrumentId]: price };
+  const next = { ...current, [price.instrumentCode]: price };
   window.localStorage.setItem(INSTRUMENT_PRICES_KEY, JSON.stringify(next));
   void syncLocalStateToCloud();
   return next;

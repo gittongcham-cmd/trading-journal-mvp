@@ -107,7 +107,12 @@ export interface InstrumentPrice {
   instrumentId: string;
   instrumentCode: string;
   instrumentName: string;
+  marketType?: MarketType;
   currentPrice: number;
+  previousClose?: number;
+  changeAmount?: number;
+  changeRate?: number;
+  source?: "manual" | "csv" | "external";
   updatedAt: string;
 }
 
@@ -122,6 +127,25 @@ export interface SpotHoldingSummary {
   currentAmount?: number;
   valuationPnl?: number;
   valuationReturnRate?: number;
+}
+
+export interface PositionHoldingSummary {
+  id: string;
+  marketType: MarketType;
+  positionSide: PositionSide;
+  instrumentId: string;
+  instrumentName: string;
+  instrumentCode: string;
+  quantity: number;
+  averageEntryPrice: number;
+  multiplier?: number;
+  investmentAmount: number;
+  nominalAmount?: number;
+  currentPrice?: number;
+  currentAmount?: number;
+  unrealizedPnl?: number;
+  returnRate?: number;
+  updatedAt?: string;
 }
 
 export interface DateRange {

@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { calculateWinRate } from "@/lib/calculations";
 import { formatKRW, formatNumber, formatPercent, pnlClass } from "@/lib/format";
-import { loadAccountBalanceSnapshots, loadTrades } from "@/lib/store";
-import type { AccountBalanceSnapshot, EmotionTag, Trade } from "@/types/trading";
+import { calculateOpenPositions, summarizeOpenPositions } from "@/lib/holdings";
+import { loadInstrumentPrices, loadTrades } from "@/lib/store";
+import type { EmotionTag, Trade } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
-import { SectionHeader } from "@/components/ui/SectionHeader";
 
 const emotionLabels: Record<EmotionTag, string> = {
   confidence: "자신감",
@@ -21,97 +22,127 @@ const emotionLabels: Record<EmotionTag, string> = {
 
 export function StatsPage() {
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [accounts, setAccounts] = useState<AccountBalanceSnapshot[]>([]);
-  useEffect(() => { setTrades(loadTrades()); setAccounts(loadAccountBalanceSnapshots()); }, []);
+  useEffect(() => { setTrades(loadTrades()); }, []);
 
-  const closed = trades.filter((trade) => trade.realizedPnl !== 0);
+  const prices = loadInstrumentPrices();
+  const closed = trades.filter((trade) => trade.tradeAction !== "entry" || trade.exitPrice !== undefined);
   const profits = closed.filter((trade) => trade.realizedPnl > 0);
   const losses = closed.filter((trade) => trade.realizedPnl < 0);
-  const cumulativePnl = trades.reduce((sum, trade) => sum + trade.realizedPnl, 0);
+  const realizedPnl = closed.reduce((sum, trade) => sum + trade.realizedPnl, 0);
+  const spotRealizedPnl = closed.filter((trade) => trade.marketType === "spot").reduce((sum, trade) => sum + trade.realizedPnl, 0);
+  const futuresRealizedPnl = closed.filter((trade) => trade.marketType === "futures").reduce((sum, trade) => sum + trade.realizedPnl, 0);
+  const positions = useMemo(() => calculateOpenPositions(trades, prices), [trades, prices]);
+  const positionSummary = useMemo(() => summarizeOpenPositions(positions), [positions]);
+  const spotPositions = positions.filter((position) => position.marketType === "spot");
+  const futuresPositions = positions.filter((position) => position.marketType === "futures");
+  const spotUnrealized = spotPositions.reduce((sum, position) => sum + (position.unrealizedPnl ?? 0), 0);
+  const futuresUnrealized = futuresPositions.reduce((sum, position) => sum + (position.unrealizedPnl ?? 0), 0);
   const averageProfit = profits.reduce((sum, trade) => sum + trade.realizedPnl, 0) / Math.max(profits.length, 1);
   const averageLoss = losses.reduce((sum, trade) => sum + trade.realizedPnl, 0) / Math.max(losses.length, 1);
   const profitLossRatio = Math.abs(averageProfit / (averageLoss || -1));
-  const spotPnl = trades.filter((trade) => trade.marketType === "spot").reduce((sum, trade) => sum + trade.realizedPnl, 0);
-  const futuresPnl = trades.filter((trade) => trade.marketType === "futures").reduce((sum, trade) => sum + trade.realizedPnl, 0);
-  const maxDrawdown = useMemo(() => {
-    let peak = accounts[0]?.totalBalance ?? 0;
-    let drawdown = 0;
-    accounts.forEach((account) => {
-      peak = Math.max(peak, account.totalBalance);
-      drawdown = Math.min(drawdown, account.totalBalance - peak);
-    });
-    return drawdown;
-  }, [accounts]);
-
-  const monthly = useMemo(() => aggregate(trades, (trade) => trade.tradeDate.slice(0, 7)), [trades]);
-  const weekday = useMemo(() => aggregate(trades, (trade) => ["일", "월", "화", "수", "목", "금", "토"][new Date(`${trade.tradeDate}T00:00:00`).getDay()]), [trades]);
+  const monthly = useMemo(() => aggregate(closed, (trade) => trade.tradeDate.slice(0, 7)), [closed]);
+  const weekly = useMemo(() => aggregate(closed, (trade) => toWeekLabel(trade.tradeDate)), [closed]);
   const byMarket = [
-    { name: "현물", value: Math.abs(trades.filter((trade) => trade.marketType === "spot").reduce((sum, trade) => sum + trade.realizedPnl, 0)) },
-    { name: "선물", value: Math.abs(trades.filter((trade) => trade.marketType === "futures").reduce((sum, trade) => sum + trade.realizedPnl, 0)) }
+    { name: "현물", value: Math.abs(spotRealizedPnl), raw: spotRealizedPnl },
+    { name: "선물", value: Math.abs(futuresRealizedPnl), raw: futuresRealizedPnl }
   ];
-  const byInstrument = useMemo(() => aggregate(trades, (trade) => trade.instrumentName), [trades]);
+  const byInstrument = useMemo(() => aggregate(closed, (trade) => trade.instrumentName).sort((a, b) => b.pnl - a.pnl), [closed]);
   const emotionStats = (Object.keys(emotionLabels) as EmotionTag[]).map((tag) => {
-    const tagged = trades.filter((trade) => trade.emotionTags.includes(tag));
+    const tagged = closed.filter((trade) => trade.emotionTags.includes(tag));
     const wins = tagged.filter((trade) => trade.realizedPnl > 0).length;
+    const lossCount = tagged.filter((trade) => trade.realizedPnl < 0).length;
     return {
       tag,
       label: emotionLabels[tag],
-      ratio: trades.length ? (tagged.length / trades.length) * 100 : 0,
+      count: tagged.length,
       averagePnl: tagged.reduce((sum, trade) => sum + trade.realizedPnl, 0) / Math.max(tagged.length, 1),
       winRate: tagged.length ? (wins / tagged.length) * 100 : 0,
-      correlation: tagged.reduce((sum, trade) => sum + trade.realizedPnl, 0) >= 0 ? "수익 쪽" : "손실 쪽"
+      lossRatio: tagged.length ? (lossCount / tagged.length) * 100 : 0
     };
   });
+  const insight = buildInsight(emotionStats, futuresRealizedPnl, spotRealizedPnl, positions);
 
   return (
-    <div>
-      <SectionHeader title="통계/복기" />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="전체 누적수익" value={formatKRW(cumulativePnl)} tone="pnl" />
-        <KpiCard label="현물 누적수익" value={formatKRW(spotPnl)} tone="pnl" />
-        <KpiCard label="선물 누적수익" value={formatKRW(futuresPnl)} tone="pnl" />
-        <KpiCard label="최대 낙폭" value={formatKRW(maxDrawdown)} tone="pnl" />
-        <KpiCard label="평균 수익" value={formatKRW(averageProfit)} tone="pnl" />
-        <KpiCard label="평균 손실" value={formatKRW(averageLoss)} tone="pnl" />
-        <KpiCard label="손익비" value={formatNumber(profitLossRatio, 2)} />
-        <KpiCard label="최고 승률 구간" value="오전" />
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-black text-slate-950">통계/복기</h1>
+        <p className="mt-1 text-sm text-slate-500">내가 어떤 거래에서 벌고 잃는지 실현손익, 미실현손익, 감정 태그를 나눠 봅니다.</p>
       </div>
-      <div className="mt-5 grid gap-4 xl:grid-cols-2">
-        <Chart title="월별 손익"><BarChart data={monthly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl">{monthly.map((item) => <Cell key={item.name} fill={item.pnl >= 0 ? "#dc2626" : "#2563eb"} />)}</Bar></BarChart></Chart>
-        <Chart title="요일별 성과"><BarChart data={weekday}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl" fill="#475569" /></BarChart></Chart>
-        <Chart title="누적 자산곡선"><AreaChart data={accounts}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="recordDate" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Area dataKey="totalBalance" stroke="#0f172a" fill="#dbeafe" /></AreaChart></Chart>
-        <Chart title="현물/선물별 손익 비중"><PieChart><Pie data={byMarket} dataKey="value" nameKey="name" outerRadius={90} label><Cell fill="#ef4444" /><Cell fill="#2563eb" /></Pie><Tooltip formatter={(value) => formatKRW(Number(value))} /></PieChart></Chart>
-        <Chart title="상품/전략별 손익 비중"><BarChart data={byInstrument}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl" fill="#0f766e" /></BarChart></Chart>
+
+      <section>
+        <h2 className="mb-3 text-lg font-black">실현손익 요약</h2>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard label="전체 실현손익" value={formatKRW(realizedPnl)} tone="pnl" caption="청산 완료 거래 기준" />
+          <KpiCard label="현물 실현손익" value={formatKRW(spotRealizedPnl)} tone="pnl" caption="현물 청산 거래" />
+          <KpiCard label="선물 실현손익" value={formatKRW(futuresRealizedPnl)} tone="pnl" caption="선물 청산 거래" />
+          <KpiCard label="손익비" value={formatNumber(profitLossRatio, 2)} caption="평균수익 / 평균손실" />
+        </div>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-lg font-black">미실현손익 요약</h2>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard label="보유 포지션 미실현손익" value={formatKRW(positionSummary.unrealizedPnl)} tone="pnl" caption="현재가 입력분 기준" />
+          <KpiCard label="현물 미실현손익" value={formatKRW(spotUnrealized)} tone="pnl" caption="보유 현물" />
+          <KpiCard label="선물 미실현손익" value={formatKRW(futuresUnrealized)} tone="pnl" caption="보유 선물" />
+          <KpiCard label="평가수익률" value={formatPercent(positionSummary.valuationReturnRate)} tone="pnl" caption="현재가 입력분 기준" />
+        </div>
+      </section>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Chart title="월별 실현손익"><BarChart data={monthly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl">{monthly.map((item) => <Cell key={item.name} fill={item.pnl >= 0 ? "#ef4444" : "#3b82f6"} />)}</Bar></BarChart></Chart>
+        <Chart title="주별 실현손익"><BarChart data={weekly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl">{weekly.map((item) => <Cell key={item.name} fill={item.pnl >= 0 ? "#ef4444" : "#3b82f6"} />)}</Bar></BarChart></Chart>
+        <Chart title="현물/선물 손익 비교"><PieChart><Pie data={byMarket} dataKey="value" nameKey="name" outerRadius={90} label={(item) => `${item.name} ${formatKRW(item.raw)}`}><Cell fill="#14b8a6" /><Cell fill="#2563eb" /></Pie><Tooltip formatter={(_value, _name, item) => formatKRW(Number(item.payload.raw))} /></PieChart></Chart>
+        <Chart title="종목별 성과 TOP 5"><BarChart data={byInstrument.slice(0, 5)}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl" fill="#0f766e" /></BarChart></Chart>
       </div>
-      <div className="card mt-5 p-4">
-        <div className="mb-3 text-lg font-black">감정 분석</div>
-        <div className="grid gap-3 md:grid-cols-4">
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <div className="card p-5">
+          <h2 className="text-lg font-black">시장별 성과</h2>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <MiniStat label="현물 승률" value={formatPercent(calculateWinRate(closed.filter((trade) => trade.marketType === "spot")))} />
+            <MiniStat label="선물 승률" value={formatPercent(calculateWinRate(closed.filter((trade) => trade.marketType === "futures")))} />
+            <MiniStat label="현물 평균 손익" value={formatKRW(averageByMarket(closed, "spot"))} />
+            <MiniStat label="선물 평균 손익" value={formatKRW(averageByMarket(closed, "futures"))} />
+          </div>
+        </div>
+        <div className="card p-5">
+          <h2 className="text-lg font-black">한 줄 인사이트</h2>
+          <p className="mt-4 rounded-xl bg-blue-50 p-4 text-sm font-bold leading-6 text-blue-800">{insight}</p>
+          <p className="mt-3 text-sm font-semibold text-slate-500">다음 거래에서는 손실이 반복된 종목, 조급함 태그, 미청산 포지션 규모를 먼저 확인해보세요.</p>
+        </div>
+      </section>
+
+      <section className="card p-5">
+        <h2 className="text-lg font-black">감정 태그 분석</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
           {emotionStats.map((emotion) => (
-            <div key={emotion.tag} className="rounded-md border border-slate-200 p-3">
+            <div key={emotion.tag} className="rounded-xl border border-slate-200 p-3">
               <div className="font-bold">{emotion.label}</div>
               <div className="mt-2 space-y-1 text-sm text-slate-600">
-                <div>발생 비율 {formatPercent(emotion.ratio)}</div>
+                <div>거래 횟수 {emotion.count}건</div>
                 <div className={pnlClass(emotion.averagePnl)}>평균 손익 {formatKRW(emotion.averagePnl)}</div>
                 <div>승률 {formatPercent(emotion.winRate)}</div>
-                <div>상관관계 {emotion.correlation}</div>
+                <div>손실 비중 {formatPercent(emotion.lossRatio)}</div>
               </div>
             </div>
           ))}
         </div>
-      </div>
-      <div className="card mt-5 p-4">
-        <div className="mb-3 text-lg font-black">복기 노트</div>
-        <div className="grid gap-3 md:grid-cols-3">
+      </section>
+
+      <section className="card p-5">
+        <h2 className="text-lg font-black">복기 노트</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
           {trades.slice(-3).reverse().map((trade) => (
-            <div key={trade.id} className="rounded-md border border-slate-200 p-3">
+            <div key={trade.id} className="rounded-xl border border-slate-200 p-3">
               <div className={`text-xs font-bold ${pnlClass(trade.realizedPnl)}`}>{trade.realizedPnl >= 0 ? "수익 거래" : "손실 거래"}</div>
               <div className="mt-1 font-bold">{trade.instrumentName}</div>
-              <div className="mt-2 text-sm text-slate-600">{trade.reviewMemo}</div>
-              <div className="mt-2 text-xs text-slate-500">인사이트: {trade.emotionTags.includes("impatience") ? "조급함 태그가 붙은 거래의 손실 비율을 점검해보세요." : trade.marketType === "futures" ? "선물 거래 손익 변동성이 현물보다 클 수 있습니다." : "오전장 성과와 종목 반복 손실 여부를 함께 확인해보세요."}</div>
+              <div className="mt-2 text-sm text-slate-600">{trade.reviewMemo || "복기 메모가 아직 없습니다."}</div>
             </div>
           ))}
+          {!trades.length && <div className="rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">거래를 기록하면 최근 복기 메모가 여기에 모입니다.</div>}
         </div>
-      </div>
+      </section>
     </div>
   );
 }
@@ -120,6 +151,28 @@ function aggregate(trades: Trade[], keyer: (trade: Trade) => string) {
   const map = new Map<string, number>();
   trades.forEach((trade) => map.set(keyer(trade), (map.get(keyer(trade)) ?? 0) + trade.realizedPnl));
   return Array.from(map.entries()).map(([name, pnl]) => ({ name, pnl }));
+}
+
+function toWeekLabel(dateText: string) {
+  const date = new Date(dateText);
+  return `${date.getMonth() + 1}월 ${Math.ceil(date.getDate() / 7)}주`;
+}
+
+function averageByMarket(trades: Trade[], marketType: "spot" | "futures") {
+  const filtered = trades.filter((trade) => trade.marketType === marketType);
+  return filtered.reduce((sum, trade) => sum + trade.realizedPnl, 0) / Math.max(filtered.length, 1);
+}
+
+function buildInsight(emotions: { label: string; averagePnl: number; count: number }[], futuresPnl: number, spotPnl: number, positions: unknown[]) {
+  const worstEmotion = emotions.filter((emotion) => emotion.count > 0).sort((a, b) => a.averagePnl - b.averagePnl)[0];
+  if (worstEmotion) return `${worstEmotion.label} 태그가 붙은 거래의 평균 손익이 가장 낮습니다. 다음 거래 전 같은 감정이 반복되는지 먼저 확인해보세요.`;
+  if (Math.abs(futuresPnl) > Math.abs(spotPnl)) return "선물 거래의 변동성이 현물보다 큽니다. 계약수와 손절 기준을 먼저 점검해보세요.";
+  if (positions.length) return "청산하지 않은 포지션의 미실현손익이 전체 성과에 영향을 줄 수 있습니다.";
+  return "거래 기록을 쌓으면 시장별, 종목별, 감정별 인사이트가 자동으로 정리됩니다.";
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl border border-slate-200 p-4"><div className="label">{label}</div><div className="mt-2 text-lg font-black text-slate-900">{value}</div></div>;
 }
 
 function Chart({ title, children }: { title: string; children: React.ReactElement }) {

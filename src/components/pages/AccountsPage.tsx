@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { maskAccountNumber, sumNegative, sumPositive } from "@/lib/accountBalances";
 import { isAdminMode } from "@/lib/auth";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
@@ -24,8 +24,8 @@ export function AccountsPage() {
   const latest = records[records.length - 1];
   const positiveBalance = latest ? sumPositive(latest.items) : 0;
   const negativeBalance = latest ? sumNegative(latest.items) : 0;
-  const monthlyData = useMemo(() => records.map((record) => ({ date: record.recordDate, change: record.previousMonthChangeAmount ?? 0 })), [records]);
-  const donutData = latest?.items.map((item) => ({ name: item.accountName || item.bankName, value: Math.abs(item.amount), raw: item.amount })) ?? [];
+  const weeklyData = useMemo(() => toWeeklyBalance(records), [records]);
+  const donutData = useMemo(() => toTopAccountShare(latest), [latest]);
 
   function deleteRecord(id: string) {
     const ok = window.confirm("이 계좌 잔고 기록을 삭제할까요? 삭제 후에는 이후 기록의 증감률이 다시 계산됩니다.");
@@ -56,33 +56,38 @@ export function AccountsPage() {
 
       <div className="grid gap-5 xl:grid-cols-3">
         <Chart title="총 잔고 추이">
-          <AreaChart data={records}>
+          <AreaChart data={weeklyData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey="recordDate" />
+            <XAxis dataKey="label" />
             <YAxis hide />
             <Tooltip formatter={(value) => formatKRW(Number(value))} />
             <Area dataKey="totalBalance" stroke="#2563eb" fill="#dbeafe" name="총 잔고" />
           </AreaChart>
         </Chart>
-        <Chart title="전달 대비 증감 추이">
-          <BarChart data={monthlyData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey="date" />
-            <YAxis hide />
-            <Tooltip formatter={(value) => formatKRW(Number(value))} />
-            <Bar dataKey="change" name="전달 대비">
-              {monthlyData.map((item) => <Cell key={item.date} fill={item.change >= 0 ? "#ef4444" : "#3b82f6"} />)}
-            </Bar>
-          </BarChart>
-        </Chart>
-        <Chart title="계좌별 비중">
+        <section className="card p-5 xl:col-span-2">
+          <div className="mb-4 text-lg font-black">계좌별 비중</div>
+          <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+            <ResponsiveContainer width="100%" height={260}>
           <PieChart>
-            <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} label>
+            <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92}>
               {donutData.map((item, index) => <Cell key={`${item.name}-${index}`} fill={item.raw < 0 ? "#3b82f6" : ["#2563eb", "#14b8a6", "#f97316", "#64748b"][index % 4]} />)}
             </Pie>
             <Tooltip formatter={(_value, _name, item) => formatKRW(Number(item.payload.raw))} />
           </PieChart>
-        </Chart>
+            </ResponsiveContainer>
+            <div className="space-y-2">
+              {donutData.map((item) => (
+                <div key={item.name} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm">
+                  <div className="font-bold text-slate-700">{item.name}</div>
+                  <div className={`text-right font-black ${item.raw < 0 ? "text-blue-500" : "text-slate-900"}`}>
+                    {formatKRW(item.raw)} / {formatPercent(item.percent)}
+                  </div>
+                </div>
+              ))}
+              {!donutData.length && <EmptyText text="계좌 잔고를 등록하면 계좌별 비중을 볼 수 있어요." />}
+            </div>
+          </div>
+        </section>
       </div>
 
       <section className="card overflow-hidden">
@@ -156,4 +161,38 @@ function formatChange(amount?: number, rate?: number): string {
 
 function Chart({ title, children }: { title: string; children: React.ReactElement }) {
   return <section className="card p-5"><div className="mb-4 text-lg font-black">{title}</div><ResponsiveContainer width="100%" height={260}>{children}</ResponsiveContainer></section>;
+}
+
+function toWeeklyBalance(records: AccountBalanceSnapshot[]) {
+  const byWeek = new Map<string, { label: string; totalBalance: number; recordDate: string }>();
+  records.forEach((record) => {
+    const date = new Date(record.recordDate);
+    const month = date.getMonth() + 1;
+    const week = Math.ceil(date.getDate() / 7);
+    const key = `${date.getFullYear()}-${month}-${week}`;
+    const label = `${month}월 ${week}주`;
+    const current = byWeek.get(key);
+    if (!current || record.recordDate >= current.recordDate) {
+      byWeek.set(key, { label, totalBalance: record.totalBalance, recordDate: record.recordDate });
+    }
+  });
+  return Array.from(byWeek.values());
+}
+
+function toTopAccountShare(snapshot?: AccountBalanceSnapshot) {
+  if (!snapshot) return [];
+  const items = snapshot.items
+    .map((item) => ({ name: item.accountName || item.bankName, raw: item.amount, value: Math.abs(item.amount) }))
+    .sort((a, b) => b.value - a.value);
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  const top = items.slice(0, 3);
+  const rest = items.slice(3);
+  const restValue = rest.reduce((sum, item) => sum + item.value, 0);
+  const restRaw = rest.reduce((sum, item) => sum + item.raw, 0);
+  const rows = rest.length ? [...top, { name: "기타", raw: restRaw, value: restValue }] : top;
+  return rows.map((item) => ({ ...item, percent: total ? (item.value / total) * 100 : 0 }));
+}
+
+function EmptyText({ text }: { text: string }) {
+  return <div className="rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">{text}</div>;
 }
