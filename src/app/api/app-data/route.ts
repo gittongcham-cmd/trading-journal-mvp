@@ -2,13 +2,15 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 const DATA_KEYS = ["trades", "accountBalanceSnapshots", "instrumentPrices"];
+const VIEW_PASSWORD = process.env.VIEW_PASSWORD || "7531";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin7531";
 
 function isViewerPassword(password: string | null): boolean {
-  return Boolean(password && (password === process.env.VIEW_PASSWORD || password === process.env.ADMIN_PASSWORD));
+  return Boolean(password && (password.trim() === VIEW_PASSWORD || password.trim() === ADMIN_PASSWORD));
 }
 
 function isAdminPassword(password: string | null): boolean {
-  return Boolean(password && password === process.env.ADMIN_PASSWORD);
+  return Boolean(password && password.trim() === ADMIN_PASSWORD);
 }
 
 function getSupabaseAdmin() {

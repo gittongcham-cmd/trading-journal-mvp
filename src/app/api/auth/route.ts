@@ -1,16 +1,21 @@
 import { NextResponse } from "next/server";
 
+const VIEW_PASSWORD = process.env.VIEW_PASSWORD || "7531";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin7531";
+
 export async function POST(request: Request) {
   const { password } = (await request.json()) as { password?: string };
-  if (!password) {
+  const normalizedPassword = password?.trim();
+
+  if (!normalizedPassword) {
     return NextResponse.json({ error: "Password is required" }, { status: 400 });
   }
 
-  if (password === process.env.ADMIN_PASSWORD) {
+  if (normalizedPassword === ADMIN_PASSWORD) {
     return NextResponse.json({ role: "admin" });
   }
 
-  if (password === process.env.VIEW_PASSWORD) {
+  if (normalizedPassword === VIEW_PASSWORD) {
     return NextResponse.json({ role: "viewer" });
   }
 
