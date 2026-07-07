@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { isAdminMode } from "@/lib/auth";
+import { getAccessPassword, isAdminMode } from "@/lib/auth";
+import { hydrateLocalStateFromCloud, syncLocalStateToCloud } from "@/lib/store";
 import type { MarketFilter } from "@/types/trading";
 
 const navItems = [
@@ -17,7 +18,23 @@ const navItems = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [market, setMarket] = useState<MarketFilter>("all");
+  const [syncing, setSyncing] = useState(false);
   const admin = isAdminMode();
+
+  async function refreshCloudData() {
+    const password = getAccessPassword();
+    if (!password) return;
+    setSyncing(true);
+    await hydrateLocalStateFromCloud(password).catch(() => undefined);
+    setSyncing(false);
+    window.location.reload();
+  }
+
+  async function uploadLocalData() {
+    setSyncing(true);
+    await syncLocalStateToCloud().catch(() => undefined);
+    setSyncing(false);
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 lg:flex">
@@ -48,7 +65,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="mt-1 text-sm font-black text-slate-900">선물/현물 통합 계좌</div>
             <div className="mt-3 text-xs text-slate-500">최근 동기화</div>
             <div className="mt-1 text-xs font-semibold text-slate-700">2026-07-03 15:30</div>
-            <button className="btn btn-secondary mt-3 w-full" type="button">데이터 새로고침</button>
+            <button className="btn btn-secondary mt-3 w-full" type="button" onClick={refreshCloudData} disabled={syncing}>데이터 새로고침</button>
+            {admin && <button className="btn btn-primary mt-2 w-full" type="button" onClick={uploadLocalData} disabled={syncing}>현재 데이터 클라우드 저장</button>}
           </div>
         </div>
       </aside>
@@ -78,7 +96,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <input className="input max-w-40" type="date" defaultValue="2026-07-03" />
               </div>
               <div className="text-xs font-semibold text-slate-500">마지막 업데이트 15:30</div>
-              <button className="btn btn-secondary" type="button">새로고침</button>
+              <button className="btn btn-secondary" type="button" onClick={refreshCloudData} disabled={syncing}>새로고침</button>
               {admin && <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>}
             </div>
           </div>

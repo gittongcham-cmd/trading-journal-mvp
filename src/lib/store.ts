@@ -179,6 +179,9 @@ function normalizeBalanceSnapshot(snapshot: Partial<AccountBalanceSnapshot>): Ac
 }
 
 export async function hydrateLocalStateFromCloud(password: string): Promise<void> {
+  const localTrades = loadTrades();
+  const localBalanceSnapshots = loadAccountBalanceSnapshots();
+  const localInstrumentPrices = loadInstrumentPrices();
   const response = await fetch("/api/app-data", {
     headers: { "x-app-password": password }
   });
@@ -188,9 +191,23 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
     accountBalanceSnapshots?: AccountBalanceSnapshot[];
     instrumentPrices?: Record<string, InstrumentPrice>;
   };
-  window.localStorage.setItem(TRADES_KEY, JSON.stringify(withCumulativePnl((data.trades ?? []).map(normalizeTrade))));
-  window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(recalculateBalanceSnapshots((data.accountBalanceSnapshots ?? []).map(normalizeBalanceSnapshot))));
-  window.localStorage.setItem(INSTRUMENT_PRICES_KEY, JSON.stringify(data.instrumentPrices ?? {}));
+  const cloudTrades = withCumulativePnl((data.trades ?? []).map(normalizeTrade));
+  const cloudBalanceSnapshots = recalculateBalanceSnapshots((data.accountBalanceSnapshots ?? []).map(normalizeBalanceSnapshot));
+  const cloudInstrumentPrices = data.instrumentPrices ?? {};
+  const hasCloudPrices = Object.keys(cloudInstrumentPrices).length > 0;
+  const shouldSeedCloud =
+    isAdminMode() &&
+    ((cloudTrades.length === 0 && localTrades.length > 0) ||
+      (cloudBalanceSnapshots.length === 0 && localBalanceSnapshots.length > 0) ||
+      (!hasCloudPrices && Object.keys(localInstrumentPrices).length > 0));
+
+  window.localStorage.setItem(TRADES_KEY, JSON.stringify(cloudTrades.length ? cloudTrades : localTrades));
+  window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(cloudBalanceSnapshots.length ? cloudBalanceSnapshots : localBalanceSnapshots));
+  window.localStorage.setItem(INSTRUMENT_PRICES_KEY, JSON.stringify(hasCloudPrices ? cloudInstrumentPrices : localInstrumentPrices));
+
+  if (shouldSeedCloud) {
+    await syncLocalStateToCloud();
+  }
 }
 
 export async function syncLocalStateToCloud(): Promise<void> {
