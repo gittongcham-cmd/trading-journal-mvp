@@ -8,6 +8,8 @@ export function calculateSpotHoldings(trades: Trade[], prices: Record<string, In
     buyQuantity: number;
     sellQuantity: number;
     buyAmount: number;
+    currency?: "KRW" | "USD";
+    exchangeRate?: number;
   }>();
 
   trades
@@ -19,7 +21,9 @@ export function calculateSpotHoldings(trades: Trade[], prices: Record<string, In
         instrumentCode: trade.instrumentCode,
         buyQuantity: 0,
         sellQuantity: 0,
-        buyAmount: 0
+        buyAmount: 0,
+        currency: trade.currency ?? "KRW",
+        exchangeRate: trade.exchangeRate
       };
       const quantity = trade.quantity ?? 0;
 
@@ -53,6 +57,8 @@ export function calculateSpotHoldings(trades: Trade[], prices: Record<string, In
         instrumentId: item.instrumentId,
         instrumentName: item.instrumentName,
         instrumentCode: item.instrumentCode,
+        currency: item.currency,
+        exchangeRate: item.exchangeRate,
         quantity,
         averageEntryPrice,
         investmentAmount,
@@ -113,6 +119,8 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
     exitContracts: number;
     entryAmount: number;
     multiplier: number;
+    currency?: "KRW" | "USD";
+    exchangeRate?: number;
   }>();
 
   trades
@@ -128,7 +136,9 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
         entryContracts: 0,
         exitContracts: 0,
         entryAmount: 0,
-        multiplier: trade.multiplier ?? 250000
+        multiplier: trade.multiplier ?? 250000,
+        currency: trade.currency ?? "KRW",
+        exchangeRate: trade.exchangeRate
       };
       const contracts = trade.contractCount ?? 0;
 
@@ -168,6 +178,8 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
         instrumentId: item.instrumentId,
         instrumentName: item.instrumentName,
         instrumentCode: item.instrumentCode,
+        currency: item.currency,
+        exchangeRate: item.exchangeRate,
         quantity,
         averageEntryPrice,
         multiplier: item.multiplier,

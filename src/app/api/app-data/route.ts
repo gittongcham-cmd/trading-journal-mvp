@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
-const DATA_KEYS = ["trades", "accountBalanceSnapshots", "instrumentPrices"];
+const DATA_KEYS = ["trades", "accountBalanceSnapshots", "instrumentPrices", "customInstruments"];
 const VIEW_PASSWORD = process.env.VIEW_PASSWORD || "7531";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin7531";
 
@@ -39,7 +39,8 @@ export async function GET(request: Request) {
   const state = {
     trades: [],
     accountBalanceSnapshots: [],
-    instrumentPrices: {}
+    instrumentPrices: {},
+    customInstruments: []
   } as Record<string, unknown>;
 
   data?.forEach((row: { key: string; value: unknown }) => {

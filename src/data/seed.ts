@@ -9,16 +9,19 @@ function spot(
   assetType: AssetType,
   initialConsonants: string,
   aliases: string[] = [],
-  sector = "대형주"
+  sector = "대형주",
+  exchange?: string
 ): Instrument {
   return {
     id,
     marketType: "spot",
+    region: "domestic",
     assetType,
     name,
     code,
     displayName: name,
-    exchange: assetType === "stock" ? "KOSPI" : "ETF",
+    exchange: exchange ?? (assetType === "stock" ? "KOSPI" : "ETF"),
+    currency: "KRW",
     sector,
     initialConsonants,
     aliases,
@@ -41,11 +44,13 @@ function future(
   return {
     id,
     marketType: "futures",
+    region: "domestic",
     assetType: "index_futures",
     name,
     code,
     displayName: name,
     exchange: "KRX",
+    currency: "KRW",
     sector: "지수선물",
     initialConsonants,
     aliases,
@@ -60,7 +65,36 @@ function future(
   };
 }
 
+function overseas(
+  id: string,
+  name: string,
+  ticker: string,
+  assetType: AssetType,
+  exchange: string,
+  initialConsonants: string,
+  aliases: string[] = []
+): Instrument {
+  return {
+    id,
+    marketType: "spot",
+    region: "overseas",
+    assetType,
+    name,
+    code: ticker,
+    displayName: name,
+    exchange,
+    currency: "USD",
+    sector: "해외",
+    initialConsonants,
+    aliases,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 export const instruments: Instrument[] = [
+  spot("inst-ablbio", "에이비엘바이오", "298380", "stock", "ㅇㅇㅂㅇㅂㅇ", ["ABL바이오", "에이비엘", "ABL Bio"], "바이오", "KOSDAQ"),
   spot("inst-samsung", "삼성전자", "005930", "stock", "ㅅㅅㅈㅈ", ["삼전", "samsung"]),
   spot("inst-sk-hynix", "SK하이닉스", "000660", "stock", "ㅅㅋㅎㅇㄴㅅ", ["하이닉스", "hynix", "sk hynix"], "반도체"),
   spot("inst-naver", "NAVER", "035420", "stock", "ㄴㅇㅂ", ["네이버", "naver"], "인터넷"),
@@ -92,7 +126,10 @@ export const instruments: Instrument[] = [
   spot("inst-sk-telecom", "SK텔레콤", "017670", "stock", "ㅅㅋㅌㄹㅋ", ["skt", "텔레콤"], "통신"),
   spot("inst-amore", "아모레퍼시픽", "090430", "stock", "ㅇㅁㄹㅍㅅㅍ", ["아모레"], "화장품"),
   spot("inst-kodex200", "KODEX 200", "069500", "etf", "ㅋㄷㅅ", ["코덱스200", "kodex"], "국내지수 ETF"),
+  spot("inst-kodex-sk-hynix-etf", "KODEX SK하이닉스 관련 ETF", "", "etf", "ㅋㄷㅅㅅㅋㅎㅇㄴㅅ", ["SK하이닉스 ETF", "하이닉스 ETF", "코덱스 하이닉스", "KODEX hynix"], "테마 ETF", "KOSPI"),
+  spot("inst-kodex-samsung-etf", "KODEX 삼성전자 관련 ETF", "", "etf", "ㅋㄷㅅㅅㅅㅈㅈ", ["삼성전자 ETF", "코덱스 삼성전자", "KODEX samsung"], "테마 ETF", "KOSPI"),
   spot("inst-tiger200", "TIGER 200", "102110", "etf", "ㅌㅇㄱ", ["타이거200", "tiger"], "국내지수 ETF"),
+  spot("inst-tiger-200it-leverage", "TIGER 200IT레버리지", "", "etf", "ㅌㅇㄱㅇㅇㅌㄹㅂㄹㅈ", ["타이거200IT레버리지", "TIGER IT 레버리지", "타이거 IT"], "레버리지 ETF", "KOSPI"),
   spot("inst-kodex-leverage", "KODEX 레버리지", "122630", "etf", "ㅋㄷㅅㄹㅂㄹㅈ", ["레버리지", "kodex leverage"], "레버리지 ETF"),
   spot("inst-kodex-inverse", "KODEX 인버스", "114800", "etf", "ㅋㄷㅅㅇㅂㅅ", ["인버스", "kodex inverse"], "인버스 ETF"),
   spot("inst-kodex-inverse2x", "KODEX 200선물인버스2X", "252670", "etf", "ㅋㄷㅅㅅㅁㅇㅂㅅ", ["곱버스", "인버스2x"], "인버스 ETF"),
@@ -114,6 +151,8 @@ export const instruments: Instrument[] = [
   spot("inst-s-oil", "S-Oil", "010950", "stock", "ㅅㅇㅇ", ["에쓰오일", "soil"], "정유"),
   spot("inst-lg-innotek", "LG이노텍", "011070", "stock", "ㄹㅈㅇㄴㅌ", ["이노텍"], "전자부품"),
   spot("inst-hmm", "HMM", "011200", "stock", "ㅇㅇㅁ", ["해운", "hmm"], "운송"),
+  overseas("inst-alphabet-a", "알파벳 A", "GOOGL", "stock", "NASDAQ", "ㅇㅍㅂ", ["Alphabet A", "alphabet", "Google", "구글", "알파벳"]),
+  overseas("inst-vti", "VTI", "VTI", "etf", "NYSEARCA", "ㅂㅌㅇ", ["Vanguard Total Stock Market ETF", "미국 전체 주식 ETF", "vanguard"]),
   future("inst-kospi200-fut", "KOSPI200 선물 최근월물", "KOSPI200-FUT-CURRENT", "ㅋㅅㅍ", ["코스피선물", "코스피200선물", "kospi future", "kospi200"], 250000, 0.05, 12500),
   future("inst-mini-kospi200-fut", "미니 KOSPI200 선물 최근월물", "MINI-KOSPI200-FUT-CURRENT", "ㅁㄴㅋㅅㅍ", ["미니코스피선물", "미니코스피200선물", "mini kospi"], 50000, 0.02, 1000)
 ];

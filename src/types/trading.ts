@@ -1,5 +1,7 @@
 export type MarketType = "spot" | "futures";
 export type MarketFilter = "all" | MarketType;
+export type Region = "domestic" | "overseas";
+export type Currency = "KRW" | "USD";
 export type AssetType = "stock" | "etf" | "etn" | "index_futures" | "stock_futures";
 export type PositionSide = "long" | "short";
 export type TradeAction = "entry" | "exit" | "entry_exit";
@@ -8,11 +10,14 @@ export type EmotionTag = "confidence" | "anxiety" | "impatience" | "greed" | "fe
 export interface Instrument {
   id: string;
   marketType: MarketType;
+  region?: Region;
   assetType: AssetType;
   name: string;
   code: string;
   displayName: string;
   exchange: string;
+  currency?: Currency;
+  memo?: string;
   sector?: string;
   initialConsonants: string;
   aliases: string[];
@@ -35,6 +40,9 @@ export interface Trade {
   instrumentId: string;
   instrumentName: string;
   instrumentCode: string;
+  region?: Region;
+  currency?: Currency;
+  exchangeRate?: number;
   positionSide: PositionSide;
   tradeAction: TradeAction;
   entryDate?: string;
@@ -120,6 +128,8 @@ export interface SpotHoldingSummary {
   instrumentId: string;
   instrumentName: string;
   instrumentCode: string;
+  currency?: Currency;
+  exchangeRate?: number;
   quantity: number;
   averageEntryPrice: number;
   investmentAmount: number;
@@ -136,6 +146,8 @@ export interface PositionHoldingSummary {
   instrumentId: string;
   instrumentName: string;
   instrumentCode: string;
+  currency?: Currency;
+  exchangeRate?: number;
   quantity: number;
   averageEntryPrice: number;
   multiplier?: number;

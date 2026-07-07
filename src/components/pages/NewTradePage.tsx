@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { instruments } from "@/data/seed";
 import { calculateFuturesFee, calculateRealizedPnl, calculateReturnRate, calculateTradeAmount, getActiveFuturesFeeRate } from "@/lib/calculations";
 import { formatKRW, pnlClass } from "@/lib/format";
+import { getAllInstruments } from "@/lib/search";
 import { addTrade } from "@/lib/store";
-import type { EmotionTag, Instrument, MarketType, PositionSide, TradeAction } from "@/types/trading";
+import type { Currency, EmotionTag, Instrument, MarketType, PositionSide, Region, TradeAction } from "@/types/trading";
 import { InstrumentCombobox } from "@/components/InstrumentCombobox";
 import { isAdminMode } from "@/lib/auth";
 
@@ -22,11 +22,16 @@ const emotionOptions: { value: EmotionTag; label: string }[] = [
   { value: "conviction", label: "확신" }
 ];
 
+type MarketMode = "domestic_spot" | "overseas_spot" | "futures";
+
 export function NewTradePage() {
   const router = useRouter();
   const admin = isAdminMode();
+  const allInstruments = getAllInstruments();
+  const [marketMode, setMarketMode] = useState<MarketMode>("domestic_spot");
   const [marketType, setMarketType] = useState<MarketType>("spot");
-  const [instrument, setInstrument] = useState<Instrument>(instruments.find((item) => item.marketType === "spot") ?? instruments[0]);
+  const [region, setRegion] = useState<Region>("domestic");
+  const [instrument, setInstrument] = useState<Instrument>(allInstruments.find((item) => item.marketType === "spot" && item.region !== "overseas") ?? allInstruments[0]);
   const [tradeAction, setTradeAction] = useState<TradeAction>("entry_exit");
   const [positionSide, setPositionSide] = useState<PositionSide>("long");
   const [entryDate, setEntryDate] = useState("2026-07-03");
@@ -35,6 +40,8 @@ export function NewTradePage() {
   const [exitPrice, setExitPrice] = useState(0);
   const [quantity, setQuantity] = useState(0);
   const [contractCount, setContractCount] = useState(1);
+  const [currency, setCurrency] = useState<Currency>(instrument.currency ?? "KRW");
+  const [exchangeRate, setExchangeRate] = useState(0);
   const [targetPrice, setTargetPrice] = useState(0);
   const [entryReason, setEntryReason] = useState("");
   const [exitReason, setExitReason] = useState("");
@@ -60,6 +67,7 @@ export function NewTradePage() {
     () => calculateTradeAmount({ marketType, entryPrice, quantity, contractCount, multiplier }),
     [marketType, entryPrice, quantity, contractCount, multiplier]
   );
+  const krwTradeAmount = currency === "USD" && exchangeRate ? tradeAmount * exchangeRate : tradeAmount;
   const realizedPnl = useMemo(
     () =>
       calculateRealizedPnl({
@@ -75,11 +83,25 @@ export function NewTradePage() {
     [marketType, positionSide, entryPrice, exitPrice, quantity, contractCount, multiplier, feeRate, tradeAction]
   );
 
-  function handleMarket(nextMarket: MarketType) {
+  function handleMarketMode(nextMode: MarketMode) {
+    setMarketMode(nextMode);
+    const nextMarket: MarketType = nextMode === "futures" ? "futures" : "spot";
+    const nextRegion: Region = nextMode === "overseas_spot" ? "overseas" : "domestic";
     setMarketType(nextMarket);
-    setInstrument(instruments.find((item) => item.marketType === nextMarket) ?? instruments[0]);
+    setRegion(nextRegion);
+    const nextInstrument = getAllInstruments().find((item) => item.marketType === nextMarket && (nextMarket === "futures" || (item.region ?? "domestic") === nextRegion)) ?? getAllInstruments()[0];
+    setInstrument(nextInstrument);
+    setCurrency(nextInstrument.currency ?? (nextRegion === "overseas" ? "USD" : "KRW"));
     setEntryPrice(0);
     setExitPrice(0);
+  }
+
+  function selectInstrument(nextInstrument: Instrument) {
+    setInstrument(nextInstrument);
+    setMarketType(nextInstrument.marketType);
+    setRegion(nextInstrument.region ?? "domestic");
+    setCurrency(nextInstrument.currency ?? "KRW");
+    setMarketMode(nextInstrument.marketType === "futures" ? "futures" : (nextInstrument.region === "overseas" ? "overseas_spot" : "domestic_spot"));
   }
 
   function save() {
@@ -92,7 +114,10 @@ export function NewTradePage() {
       assetType: instrument.assetType,
       instrumentId: instrument.id,
       instrumentName: instrument.displayName,
-      instrumentCode: instrument.code,
+      instrumentCode: instrument.code || instrument.displayName,
+      region,
+      currency,
+      exchangeRate: currency === "USD" && exchangeRate ? exchangeRate : undefined,
       positionSide,
       tradeAction,
       entryDate,
@@ -136,19 +161,20 @@ export function NewTradePage() {
       <form className="grid gap-4 xl:grid-cols-[1fr_1fr_360px]" onSubmit={(event) => { event.preventDefault(); save(); }}>
         <Card title="기본 정보">
           <Field label="시장 선택">
-            <div className="grid grid-cols-2 rounded-lg border border-slate-300 bg-white p-1">
+            <div className="grid grid-cols-3 rounded-lg border border-slate-300 bg-white p-1">
               {[
-                ["spot", "현물"],
+                ["domestic_spot", "국내현물"],
+                ["overseas_spot", "해외현물"],
                 ["futures", "선물"]
               ].map(([value, label]) => (
-                <button key={value} type="button" className={`rounded-md px-3 py-2 text-sm font-bold ${marketType === value ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => handleMarket(value as MarketType)}>
+                <button key={value} type="button" className={`rounded-md px-3 py-2 text-sm font-bold ${marketMode === value ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => handleMarketMode(value as MarketMode)}>
                   {label}
                 </button>
               ))}
             </div>
           </Field>
           <Field label="종목 검색">
-            <InstrumentCombobox marketFilter={marketType} value={instrument} onSelect={setInstrument} />
+            <InstrumentCombobox marketFilter={marketType} value={instrument} onSelect={selectInstrument} />
           </Field>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="매수/매도">
@@ -174,6 +200,17 @@ export function NewTradePage() {
             <Field label={marketType === "spot" ? "수량" : "계약수"}>
               <NumberInput value={marketType === "spot" ? quantity : contractCount} onChange={marketType === "spot" ? setQuantity : setContractCount} />
             </Field>
+            <Field label="통화">
+              <select className="input" value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}>
+                <option value="KRW">KRW</option>
+                <option value="USD">USD</option>
+              </select>
+            </Field>
+            {currency === "USD" && (
+              <Field label="환율">
+                <NumberInput value={exchangeRate} onChange={setExchangeRate} />
+              </Field>
+            )}
             {tradeAction !== "entry" && (
               <>
                 <Field label="청산일"><input className="input" type="date" value={exitDate} onChange={(event) => setExitDate(event.target.value)} /></Field>
@@ -197,9 +234,10 @@ export function NewTradePage() {
 
         <Card title="계산 결과">
           <div className="space-y-4">
-            <Info label="종목" value={`${instrument.displayName} · ${instrument.code}`} />
-            <Info label="시장/상품" value={`${marketType === "spot" ? "현물" : "선물"} · ${instrument.assetType}`} />
-            <Info label="거래금액" value={formatKRW(tradeAmount)} />
+            <Info label="종목" value={`${instrument.displayName} · ${instrument.code || "코드 없음"}`} />
+            <Info label="시장/상품" value={`${region === "overseas" ? "해외" : "국내"} · ${marketType === "spot" ? "현물" : "선물"} · ${instrument.assetType}`} />
+            <Info label="거래금액" value={currency === "USD" ? `$${tradeAmount.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}` : formatKRW(tradeAmount)} />
+            {currency === "USD" && <Info label="원화 환산" value={exchangeRate ? formatKRW(krwTradeAmount) : "환율 입력 필요"} />}
             <Info label="예상 수수료" value={formatKRW(fee)} />
             <Info label="예상 손익" value={formatKRW(realizedPnl)} className={pnlClass(realizedPnl)} />
             <Info label="수익률" value={`${calculateReturnRate(realizedPnl, tradeAmount).toFixed(2)}%`} />

@@ -118,9 +118,9 @@ export function TradesPage() {
                 <tr key={position.id} className="border-t border-slate-100">
                   <td className="px-4 py-3"><MarketPill market={position.marketType} /></td>
                   <td className="px-4 py-3 font-bold">{position.instrumentName}</td>
-                  <td className="px-4 py-3 text-right">{position.marketType === "spot" ? `${position.quantity.toLocaleString("ko-KR")}주` : `${position.quantity.toLocaleString("ko-KR")}계약`}</td>
-                  <td className="px-4 py-3 text-right">{position.marketType === "spot" ? formatKRW(position.averageEntryPrice) : `${position.averageEntryPrice.toLocaleString("ko-KR")}pt`}</td>
-                  <td className="px-4 py-3 text-right">{formatKRW(position.investmentAmount)}</td>
+                  <td className="px-4 py-3 text-right">{position.marketType === "spot" ? `${formatQuantity(position.quantity)}주` : `${formatQuantity(position.quantity)}계약`}</td>
+                  <td className="px-4 py-3 text-right">{position.marketType === "spot" ? formatMoney(position.averageEntryPrice, position.currency) : `${position.averageEntryPrice.toLocaleString("ko-KR")}pt`}</td>
+                  <td className="px-4 py-3 text-right">{formatMoney(position.investmentAmount, position.currency)}</td>
                   <td className="px-4 py-3 text-right">
                     {editingCode === position.instrumentCode ? (
                       <div className="flex justify-end gap-2">
@@ -129,12 +129,12 @@ export function TradesPage() {
                       </div>
                     ) : (
                       <button className="font-bold text-blue-600 underline-offset-2 hover:underline disabled:cursor-default disabled:no-underline" type="button" onClick={() => beginPriceEdit(position)} disabled={!admin}>
-                        {position.currentPrice === undefined ? "현재가 입력 필요" : position.marketType === "spot" ? formatKRW(position.currentPrice) : `${position.currentPrice.toLocaleString("ko-KR")}pt`}
+                        {position.currentPrice === undefined ? "현재가 입력 필요" : position.marketType === "spot" ? formatMoney(position.currentPrice, position.currency) : `${position.currentPrice.toLocaleString("ko-KR")}pt`}
                       </button>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right">{position.currentAmount === undefined ? "-" : formatKRW(position.currentAmount)}</td>
-                  <td className={`px-4 py-3 text-right font-black ${position.unrealizedPnl === undefined ? "text-slate-400" : pnlClass(position.unrealizedPnl)}`}>{position.unrealizedPnl === undefined ? "-" : formatKRW(position.unrealizedPnl)}</td>
+                  <td className="px-4 py-3 text-right">{position.currentAmount === undefined ? "-" : formatMoney(position.currentAmount, position.currency)}</td>
+                  <td className={`px-4 py-3 text-right font-black ${position.unrealizedPnl === undefined ? "text-slate-400" : pnlClass(position.unrealizedPnl)}`}>{position.unrealizedPnl === undefined ? "-" : formatMoney(position.unrealizedPnl, position.currency)}</td>
                   <td className={`px-4 py-3 text-right font-black ${position.returnRate === undefined ? "text-slate-400" : pnlClass(position.returnRate)}`}>{position.returnRate === undefined ? "-" : formatPercent(position.returnRate)}</td>
                   <td className="px-4 py-3 text-right text-slate-500">{position.updatedAt ? new Date(position.updatedAt).toLocaleString("ko-KR") : "-"}</td>
                 </tr>
@@ -152,8 +152,8 @@ export function TradesPage() {
         <div className="overflow-x-auto">
           <table className="min-w-[1840px] w-full text-sm">
             <thead className="bg-slate-50 text-xs font-bold text-slate-500">
-              <tr>{["날짜", "시장", "상품구분", "종목", "종목코드", "포지션", "거래유형", "진입가", "청산가", "수량/계약수", "거래금액", "예상 수수료", "실현손익", "전체 누적손익", "시장 누적손익", "현재가", "현재금액", "미실현손익", "평가수익률", "현재가 업데이트", "진입이유", "청산이유", "감정메모"].map((head, index) => (
-                <th key={head} className={`px-4 py-3 ${index >= 7 && index <= 19 ? "text-right" : "text-left"}`}>{head}</th>
+              <tr>{["날짜", "시장", "상품구분", "종목", "종목코드/티커", "통화", "매수/매도", "진입가", "수량", "환율", "거래금액", "현재가", "현재금액", "미실현손익", "평가수익률", "청산가", "실현손익", "메모"].map((head, index) => (
+                <th key={head} className={`px-4 py-3 ${index >= 7 && index <= 16 ? "text-right" : "text-left"}`}>{head}</th>
               ))}</tr>
             </thead>
             <tbody>
@@ -167,24 +167,19 @@ export function TradesPage() {
                     <td className="px-4 py-3">{trade.assetType}</td>
                     <td className="px-4 py-3 font-bold">{trade.instrumentName}</td>
                     <td className="px-4 py-3">{trade.instrumentCode}</td>
+                    <td className="px-4 py-3">{trade.currency ?? "KRW"}</td>
                     <td className="px-4 py-3">{trade.positionSide === "long" ? "매수" : "매도"}</td>
-                    <td className="px-4 py-3">{trade.tradeAction}</td>
-                    <td className="px-4 py-3 text-right">{trade.entryPrice.toLocaleString("ko-KR")}</td>
-                    <td className="px-4 py-3 text-right">{trade.exitPrice?.toLocaleString("ko-KR") ?? "-"}</td>
-                    <td className="px-4 py-3 text-right">{trade.marketType === "spot" ? `${trade.quantity ?? 0}주` : `${trade.contractCount ?? 0}계약`}</td>
-                    <td className="px-4 py-3 text-right">{formatKRW(trade.tradeAmount)}</td>
-                    <td className="px-4 py-3 text-right">{formatKRW(trade.fee)}</td>
-                    <td className={`px-4 py-3 text-right font-black ${pnlClass(trade.realizedPnl)}`}>{formatKRW(trade.realizedPnl)}</td>
-                    <td className={`px-4 py-3 text-right font-black ${pnlClass(trade.cumulativePnl)}`}>{formatKRW(trade.cumulativePnl)}</td>
-                    <td className={`px-4 py-3 text-right font-black ${pnlClass(trade.marketCumulativePnl)}`}>{formatKRW(trade.marketCumulativePnl)}</td>
-                    <td className="px-4 py-3 text-right">{open ? position.currentPrice === undefined ? "현재가 입력 필요" : trade.marketType === "spot" ? formatKRW(position.currentPrice) : `${position.currentPrice.toLocaleString("ko-KR")}pt` : "-"}</td>
-                    <td className="px-4 py-3 text-right">{open && position.currentAmount !== undefined ? formatKRW(position.currentAmount) : "-"}</td>
-                    <td className={`px-4 py-3 text-right font-black ${open && position.unrealizedPnl !== undefined ? pnlClass(position.unrealizedPnl) : "text-slate-400"}`}>{open && position.unrealizedPnl !== undefined ? formatKRW(position.unrealizedPnl) : "-"}</td>
+                    <td className="px-4 py-3 text-right">{formatMoney(trade.entryPrice, trade.currency)}</td>
+                    <td className="px-4 py-3 text-right">{trade.marketType === "spot" ? `${formatQuantity(trade.quantity ?? 0)}주` : `${formatQuantity(trade.contractCount ?? 0)}계약`}</td>
+                    <td className="px-4 py-3 text-right">{trade.currency === "USD" ? (trade.exchangeRate ? trade.exchangeRate.toLocaleString("ko-KR") : "환율 입력 필요") : "-"}</td>
+                    <td className="px-4 py-3 text-right">{formatMoney(trade.tradeAmount, trade.currency)}</td>
+                    <td className="px-4 py-3 text-right">{open ? position.currentPrice === undefined ? "현재가 입력 필요" : trade.marketType === "spot" ? formatMoney(position.currentPrice, position.currency) : `${position.currentPrice.toLocaleString("ko-KR")}pt` : "-"}</td>
+                    <td className="px-4 py-3 text-right">{open && position.currentAmount !== undefined ? formatMoney(position.currentAmount, position.currency) : "-"}</td>
+                    <td className={`px-4 py-3 text-right font-black ${open && position.unrealizedPnl !== undefined ? pnlClass(position.unrealizedPnl) : "text-slate-400"}`}>{open && position.unrealizedPnl !== undefined ? formatMoney(position.unrealizedPnl, position.currency) : "-"}</td>
                     <td className={`px-4 py-3 text-right font-black ${open && position.returnRate !== undefined ? pnlClass(position.returnRate) : "text-slate-400"}`}>{open && position.returnRate !== undefined ? formatPercent(position.returnRate) : "-"}</td>
-                    <td className="px-4 py-3 text-right">{open && position.updatedAt ? new Date(position.updatedAt).toLocaleString("ko-KR") : "-"}</td>
-                    <td className="px-4 py-3">{trade.entryReason}</td>
-                    <td className="px-4 py-3">{trade.exitReason || "-"}</td>
-                    <td className="px-4 py-3">{trade.emotionTags.join(", ")}</td>
+                    <td className="px-4 py-3 text-right">{trade.exitPrice === undefined ? "-" : formatMoney(trade.exitPrice, trade.currency)}</td>
+                    <td className={`px-4 py-3 text-right font-black ${pnlClass(trade.realizedPnl)}`}>{formatMoney(trade.realizedPnl, trade.currency)}</td>
+                    <td className="px-4 py-3">{trade.reviewMemo || trade.entryReason || "-"}</td>
                   </tr>
                 );
               })}
@@ -239,4 +234,15 @@ function formatNumberInput(value: string): string {
   const [integer, decimal] = cleaned.split(".");
   const formatted = Number(integer || 0).toLocaleString("ko-KR");
   return decimal === undefined ? formatted : `${formatted}.${decimal}`;
+}
+
+function formatQuantity(value: number): string {
+  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 6 }).format(value);
+}
+
+function formatMoney(value: number, currency = "KRW"): string {
+  if (currency === "USD") {
+    return `$${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value)}`;
+  }
+  return formatKRW(value);
 }

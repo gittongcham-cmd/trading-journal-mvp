@@ -3,7 +3,8 @@
 import { withCumulativePnl } from "@/lib/calculations";
 import { withBalanceComparisons } from "@/lib/accountBalances";
 import { getAccessPassword, isAdminMode } from "@/lib/auth";
-import type { AccountBalanceSnapshot, AccountRecord, EmotionTag, InstrumentPrice, Trade } from "@/types/trading";
+import { loadCustomInstruments, saveCustomInstruments } from "@/lib/search";
+import type { AccountBalanceSnapshot, AccountRecord, EmotionTag, Instrument, InstrumentPrice, Trade } from "@/types/trading";
 
 const TRADES_KEY = "trading-journal-trades-v2-empty-start";
 const ACCOUNTS_KEY = "trading-journal-accounts-v2-empty-start";
@@ -122,6 +123,9 @@ function normalizeTrade(trade: Partial<Trade>): Trade {
     instrumentId: trade.instrumentId ?? "",
     instrumentName: trade.instrumentName ?? "",
     instrumentCode: trade.instrumentCode ?? "",
+    region: trade.region,
+    currency: trade.currency ?? "KRW",
+    exchangeRate: trade.exchangeRate,
     positionSide: trade.positionSide ?? "long",
     tradeAction: trade.tradeAction ?? "entry_exit",
     entryDate: trade.entryDate,
@@ -182,6 +186,7 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
   const localTrades = loadTrades();
   const localBalanceSnapshots = loadAccountBalanceSnapshots();
   const localInstrumentPrices = loadInstrumentPrices();
+  const localCustomInstruments = loadCustomInstruments();
   const response = await fetch("/api/app-data", {
     headers: { "x-app-password": password }
   });
@@ -190,20 +195,24 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
     trades?: Trade[];
     accountBalanceSnapshots?: AccountBalanceSnapshot[];
     instrumentPrices?: Record<string, InstrumentPrice>;
+    customInstruments?: Instrument[];
   };
   const cloudTrades = withCumulativePnl((data.trades ?? []).map(normalizeTrade));
   const cloudBalanceSnapshots = recalculateBalanceSnapshots((data.accountBalanceSnapshots ?? []).map(normalizeBalanceSnapshot));
   const cloudInstrumentPrices = data.instrumentPrices ?? {};
+  const cloudCustomInstruments = data.customInstruments ?? [];
   const hasCloudPrices = Object.keys(cloudInstrumentPrices).length > 0;
   const shouldSeedCloud =
     isAdminMode() &&
     ((cloudTrades.length === 0 && localTrades.length > 0) ||
       (cloudBalanceSnapshots.length === 0 && localBalanceSnapshots.length > 0) ||
-      (!hasCloudPrices && Object.keys(localInstrumentPrices).length > 0));
+      (!hasCloudPrices && Object.keys(localInstrumentPrices).length > 0) ||
+      (cloudCustomInstruments.length === 0 && localCustomInstruments.length > 0));
 
   window.localStorage.setItem(TRADES_KEY, JSON.stringify(cloudTrades.length ? cloudTrades : localTrades));
   window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(cloudBalanceSnapshots.length ? cloudBalanceSnapshots : localBalanceSnapshots));
   window.localStorage.setItem(INSTRUMENT_PRICES_KEY, JSON.stringify(hasCloudPrices ? cloudInstrumentPrices : localInstrumentPrices));
+  saveCustomInstruments(cloudCustomInstruments.length ? cloudCustomInstruments : localCustomInstruments);
 
   if (shouldSeedCloud) {
     await syncLocalStateToCloud();
@@ -223,7 +232,8 @@ export async function syncLocalStateToCloud(): Promise<boolean> {
     body: JSON.stringify({
       trades: loadTrades(),
       accountBalanceSnapshots: loadAccountBalanceSnapshots(),
-      instrumentPrices: loadInstrumentPrices()
+      instrumentPrices: loadInstrumentPrices(),
+      customInstruments: loadCustomInstruments()
     })
   }).catch(() => null);
   return Boolean(response?.ok);
