@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { maskAccountNumber, sumNegative, sumPositive } from "@/lib/accountBalances";
+import { isAdminMode } from "@/lib/auth";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
 import { deleteAccountBalanceSnapshot, loadAccountBalanceSnapshots } from "@/lib/store";
 import type { AccountBalanceSnapshot } from "@/types/trading";
@@ -12,6 +13,7 @@ import { KpiCard } from "@/components/ui/KpiCard";
 export function AccountsPage() {
   const [records, setRecords] = useState<AccountBalanceSnapshot[]>([]);
   const [selected, setSelected] = useState<AccountBalanceSnapshot | null>(null);
+  const admin = isAdminMode();
 
   useEffect(() => {
     const loaded = loadAccountBalanceSnapshots();
@@ -40,7 +42,7 @@ export function AccountsPage() {
           <h1 className="text-2xl font-black text-slate-950">계좌 잔고 기록</h1>
           <p className="mt-1 text-sm text-slate-500">매매일지 손익과 분리된 수기 계좌 잔고 기록입니다.</p>
         </div>
-        <Link className="btn btn-primary" href="/account-records/new">+ 계좌 잔고 등록</Link>
+        {admin && <Link className="btn btn-primary" href="/account-records/new">+ 계좌 잔고 등록</Link>}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -107,8 +109,8 @@ export function AccountsPage() {
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <button className="btn btn-secondary" type="button" onClick={() => setSelected(record)}>상세보기</button>
-                        <Link className="btn btn-secondary" href={`/account-records/${record.id}/edit`}>수정</Link>
-                        <button className="btn btn-secondary text-blue-600" type="button" onClick={() => deleteRecord(record.id)}>삭제</button>
+                        {admin && <Link className="btn btn-secondary" href={`/account-records/${record.id}/edit`}>수정</Link>}
+                        {admin && <button className="btn btn-secondary text-blue-600" type="button" onClick={() => deleteRecord(record.id)}>삭제</button>}
                       </div>
                     </td>
                   </tr>

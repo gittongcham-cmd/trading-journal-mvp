@@ -9,6 +9,7 @@ import { formatKRW, pnlClass } from "@/lib/format";
 import { addTrade } from "@/lib/store";
 import type { EmotionTag, Instrument, MarketType, PositionSide, TradeAction } from "@/types/trading";
 import { InstrumentCombobox } from "@/components/InstrumentCombobox";
+import { isAdminMode } from "@/lib/auth";
 
 const emotionOptions: { value: EmotionTag; label: string }[] = [
   { value: "confidence", label: "자신감" },
@@ -23,6 +24,7 @@ const emotionOptions: { value: EmotionTag; label: string }[] = [
 
 export function NewTradePage() {
   const router = useRouter();
+  const admin = isAdminMode();
   const [marketType, setMarketType] = useState<MarketType>("spot");
   const [instrument, setInstrument] = useState<Instrument>(instruments.find((item) => item.marketType === "spot") ?? instruments[0]);
   const [tradeAction, setTradeAction] = useState<TradeAction>("entry_exit");
@@ -81,6 +83,7 @@ export function NewTradePage() {
   }
 
   function save() {
+    if (!admin) return;
     const now = new Date().toISOString();
     addTrade({
       id: `trade-${Date.now()}`,
@@ -126,7 +129,7 @@ export function NewTradePage() {
         </div>
         <div className="flex gap-2">
           <Link className="btn btn-secondary" href="/trades">취소</Link>
-          <button className="btn btn-primary" type="button" onClick={save}>저장</button>
+          {admin && <button className="btn btn-primary" type="button" onClick={save}>저장</button>}
         </div>
       </div>
 

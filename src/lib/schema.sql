@@ -94,3 +94,9 @@ create table if not exists account_balance_items (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+create table if not exists app_data (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz default now()
+);

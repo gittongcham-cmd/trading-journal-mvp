@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { changeRate, findPreviousMonthRecord, findPreviousRecord, sumNegative, sumPositive } from "@/lib/accountBalances";
+import { isAdminMode } from "@/lib/auth";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
 import { loadAccountBalanceSnapshots } from "@/lib/store";
 import type { AccountBalanceItem, AccountBalanceSnapshot } from "@/types/trading";
@@ -24,6 +25,7 @@ function emptyItem(snapshotId = ""): DraftItem {
 
 export function AccountBalanceForm({ mode, title, description, initialSnapshot, onSave }: AccountBalanceFormProps) {
   const snapshotId = initialSnapshot?.id ?? `snapshot-${Date.now()}`;
+  const admin = isAdminMode();
   const [recordDate, setRecordDate] = useState(initialSnapshot?.recordDate ?? "2026-07-04");
   const [memo, setMemo] = useState(initialSnapshot?.memo ?? "");
   const [items, setItems] = useState<DraftItem[]>(
@@ -51,6 +53,7 @@ export function AccountBalanceForm({ mode, title, description, initialSnapshot, 
   }
 
   function save() {
+    if (!admin) return;
     if (!validItems.length) return;
     const now = new Date().toISOString();
     onSave({
@@ -87,7 +90,7 @@ export function AccountBalanceForm({ mode, title, description, initialSnapshot, 
         </div>
         <div className="flex gap-2">
           <Link className="btn btn-secondary" href="/accounts">취소</Link>
-          <button className="btn btn-primary" type="button" onClick={save}>{mode === "edit" ? "수정 저장" : "저장"}</button>
+          {admin && <button className="btn btn-primary" type="button" onClick={save}>{mode === "edit" ? "수정 저장" : "저장"}</button>}
         </div>
       </div>
 
@@ -104,7 +107,7 @@ export function AccountBalanceForm({ mode, title, description, initialSnapshot, 
           <section className="card overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-100 p-5">
               <h2 className="text-lg font-black">계좌별 잔고 입력</h2>
-              <button className="btn btn-secondary" type="button" onClick={() => setItems((current) => [...current, emptyItem(snapshotId)])}>+ 계좌 추가</button>
+              {admin && <button className="btn btn-secondary" type="button" onClick={() => setItems((current) => [...current, emptyItem(snapshotId)])}>+ 계좌 추가</button>}
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-[1050px] w-full text-sm">
@@ -116,12 +119,12 @@ export function AccountBalanceForm({ mode, title, description, initialSnapshot, 
                     const amount = parseAmount(item.amountText);
                     return (
                       <tr key={item.id} className="border-t border-slate-100">
-                        <td className="px-4 py-3"><input className="input" value={item.bankName} onChange={(event) => updateItem(index, "bankName", event.target.value)} placeholder="키움증권" required /></td>
-                        <td className="px-4 py-3"><input className="input" value={item.accountNumber ?? ""} onChange={(event) => updateItem(index, "accountNumber", event.target.value)} placeholder="선택 입력" /></td>
-                        <td className="px-4 py-3"><input className="input" value={item.accountName} onChange={(event) => updateItem(index, "accountName", event.target.value)} placeholder="선물 계좌" /></td>
-                        <td className="px-4 py-3"><input className={`input text-right font-bold ${amount < 0 ? "text-blue-500" : ""}`} value={item.amountText} onChange={(event) => updateItem(index, "amountText", event.target.value)} placeholder="-3,000,000" required /></td>
-                        <td className="px-4 py-3"><input className="input" value={item.memo} onChange={(event) => updateItem(index, "memo", event.target.value)} placeholder="계좌별 메모" /></td>
-                        <td className="px-4 py-3"><button className="btn btn-secondary" type="button" onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>삭제</button></td>
+                        <td className="px-4 py-3"><input className="input" value={item.bankName} onChange={(event) => updateItem(index, "bankName", event.target.value)} placeholder="키움증권" required disabled={!admin} /></td>
+                        <td className="px-4 py-3"><input className="input" value={item.accountNumber ?? ""} onChange={(event) => updateItem(index, "accountNumber", event.target.value)} placeholder="선택 입력" disabled={!admin} /></td>
+                        <td className="px-4 py-3"><input className="input" value={item.accountName} onChange={(event) => updateItem(index, "accountName", event.target.value)} placeholder="선물 계좌" disabled={!admin} /></td>
+                        <td className="px-4 py-3"><input className={`input text-right font-bold ${amount < 0 ? "text-blue-500" : ""}`} value={item.amountText} onChange={(event) => updateItem(index, "amountText", event.target.value)} placeholder="-3,000,000" required disabled={!admin} /></td>
+                        <td className="px-4 py-3"><input className="input" value={item.memo} onChange={(event) => updateItem(index, "memo", event.target.value)} placeholder="계좌별 메모" disabled={!admin} /></td>
+                        <td className="px-4 py-3">{admin && <button className="btn btn-secondary" type="button" onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>삭제</button>}</td>
                       </tr>
                     );
                   })}

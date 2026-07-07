@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { isAdminMode } from "@/lib/auth";
 import type { MarketFilter } from "@/types/trading";
 
 const navItems = [
@@ -16,6 +17,7 @@ const navItems = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [market, setMarket] = useState<MarketFilter>("all");
+  const admin = isAdminMode();
 
   return (
     <div className="min-h-screen bg-slate-50 lg:flex">
@@ -77,7 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
               <div className="text-xs font-semibold text-slate-500">마지막 업데이트 15:30</div>
               <button className="btn btn-secondary" type="button">새로고침</button>
-              <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>
+              {admin && <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>}
             </div>
           </div>
         </header>

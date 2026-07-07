@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { sumNegative, sumPositive } from "@/lib/accountBalances";
+import { isAdminMode } from "@/lib/auth";
 import { calculateWinRate } from "@/lib/calculations";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
 import { loadAccountBalanceSnapshots, loadTrades } from "@/lib/store";
@@ -11,6 +12,7 @@ import type { AccountBalanceSnapshot, Trade } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
 
 export function DashboardPage() {
+  const admin = isAdminMode();
   const [trades, setTrades] = useState<Trade[]>([]);
   const [accounts, setAccounts] = useState<AccountBalanceSnapshot[]>([]);
   const [range, setRange] = useState("30일");
@@ -58,14 +60,14 @@ export function DashboardPage() {
           <input className="input max-w-40" type="date" defaultValue="2026-06-28" />
           <input className="input max-w-40" type="date" defaultValue="2026-07-03" />
           <span className="text-xs font-semibold text-slate-500">마지막 업데이트 15:30</span>
-          <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>
+          {admin && <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>}
         </div>
       </div>
 
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-black text-slate-950">내 자산</h2>
-          <Link className="btn btn-secondary" href="/account-records/new">+ 계좌 잔고 등록</Link>
+          {admin && <Link className="btn btn-secondary" href="/account-records/new">+ 계좌 잔고 등록</Link>}
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <KpiCard label="최신 총 잔고" value={formatKRW(latest?.totalBalance ?? 0)} tone="pnl" icon="₩" />

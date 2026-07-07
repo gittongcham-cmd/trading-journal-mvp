@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { calculateWinRate } from "@/lib/calculations";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
 import { calculateSpotHoldings, summarizeSpotHoldings } from "@/lib/holdings";
+import { isAdminMode } from "@/lib/auth";
 import { loadInstrumentPrices, loadTrades, saveInstrumentPrice } from "@/lib/store";
 import type { InstrumentPrice, MarketFilter, Trade } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
@@ -17,6 +18,7 @@ export function TradesPage() {
   const [prices, setPrices] = useState<Record<string, InstrumentPrice>>({});
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [priceDraft, setPriceDraft] = useState("");
+  const admin = isAdminMode();
 
   useEffect(() => {
     const loaded = loadTrades();
@@ -65,7 +67,7 @@ export function TradesPage() {
         </div>
         <div className="flex gap-2">
           <button className="btn btn-secondary" type="button">CSV 업로드</button>
-          <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>
+          {admin && <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>}
         </div>
       </div>
 
@@ -136,7 +138,7 @@ export function TradesPage() {
                         <button className="btn btn-primary" type="button" onClick={() => savePrice(holding)}>저장</button>
                       </div>
                     ) : (
-                      <button className="font-bold text-blue-600 underline-offset-2 hover:underline" type="button" onClick={() => beginPriceEdit(holding)}>
+                      <button className="font-bold text-blue-600 underline-offset-2 hover:underline disabled:cursor-default disabled:no-underline" type="button" onClick={() => beginPriceEdit(holding)} disabled={!admin}>
                         {holding.currentPrice === undefined ? "현재가 입력 필요" : `${holding.currentPrice.toLocaleString("ko-KR")}원`}
                       </button>
                     )}

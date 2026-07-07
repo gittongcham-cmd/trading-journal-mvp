@@ -2,6 +2,7 @@
 
 import { withCumulativePnl } from "@/lib/calculations";
 import { withBalanceComparisons } from "@/lib/accountBalances";
+import { getAccessPassword, isAdminMode } from "@/lib/auth";
 import type { AccountBalanceSnapshot, AccountRecord, EmotionTag, InstrumentPrice, Trade } from "@/types/trading";
 
 const TRADES_KEY = "trading-journal-trades-v2-empty-start";
@@ -22,6 +23,7 @@ export function loadTrades(): Trade[] {
 
 export function saveTrades(trades: Trade[]): void {
   window.localStorage.setItem(TRADES_KEY, JSON.stringify(withCumulativePnl(trades)));
+  void syncLocalStateToCloud();
 }
 
 export function addTrade(trade: Trade): Trade[] {
@@ -45,6 +47,7 @@ export function saveInstrumentPrice(price: InstrumentPrice): Record<string, Inst
   const current = loadInstrumentPrices();
   const next = { ...current, [price.instrumentId]: price };
   window.localStorage.setItem(INSTRUMENT_PRICES_KEY, JSON.stringify(next));
+  void syncLocalStateToCloud();
   return next;
 }
 
@@ -74,12 +77,14 @@ export function loadAccountBalanceSnapshots(): AccountBalanceSnapshot[] {
 
 export function saveAccountBalanceSnapshots(snapshots: AccountBalanceSnapshot[]): void {
   window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(recalculateBalanceSnapshots(snapshots)));
+  void syncLocalStateToCloud();
 }
 
 export function addAccountBalanceSnapshot(snapshot: AccountBalanceSnapshot): AccountBalanceSnapshot[] {
   const existing = loadAccountBalanceSnapshots();
   const next = recalculateBalanceSnapshots([...existing, snapshot]);
   window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(next));
+  void syncLocalStateToCloud();
   return next;
 }
 
@@ -171,4 +176,37 @@ function normalizeBalanceSnapshot(snapshot: Partial<AccountBalanceSnapshot>): Ac
     createdAt: snapshot.createdAt ?? now,
     updatedAt: snapshot.updatedAt ?? now
   };
+}
+
+export async function hydrateLocalStateFromCloud(password: string): Promise<void> {
+  const response = await fetch("/api/app-data", {
+    headers: { "x-app-password": password }
+  });
+  if (!response.ok) return;
+  const data = (await response.json()) as {
+    trades?: Trade[];
+    accountBalanceSnapshots?: AccountBalanceSnapshot[];
+    instrumentPrices?: Record<string, InstrumentPrice>;
+  };
+  window.localStorage.setItem(TRADES_KEY, JSON.stringify(withCumulativePnl((data.trades ?? []).map(normalizeTrade))));
+  window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(recalculateBalanceSnapshots((data.accountBalanceSnapshots ?? []).map(normalizeBalanceSnapshot))));
+  window.localStorage.setItem(INSTRUMENT_PRICES_KEY, JSON.stringify(data.instrumentPrices ?? {}));
+}
+
+export async function syncLocalStateToCloud(): Promise<void> {
+  if (typeof window === "undefined" || !isAdminMode()) return;
+  const password = getAccessPassword();
+  if (!password) return;
+  await fetch("/api/app-data", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "x-app-password": password
+    },
+    body: JSON.stringify({
+      trades: loadTrades(),
+      accountBalanceSnapshots: loadAccountBalanceSnapshots(),
+      instrumentPrices: loadInstrumentPrices()
+    })
+  }).catch(() => undefined);
 }
