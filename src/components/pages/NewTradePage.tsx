@@ -117,6 +117,7 @@ export function NewTradePage() {
       instrumentCode: instrument.code || instrument.displayName,
       region,
       currency,
+      exchange: instrument.exchange,
       exchangeRate: currency === "USD" && exchangeRate ? exchangeRate : undefined,
       positionSide,
       tradeAction,

@@ -42,6 +42,7 @@ export interface Trade {
   instrumentCode: string;
   region?: Region;
   currency?: Currency;
+  exchange?: string;
   exchangeRate?: number;
   positionSide: PositionSide;
   tradeAction: TradeAction;
@@ -142,11 +143,14 @@ export interface SpotHoldingSummary {
 export interface PositionHoldingSummary {
   id: string;
   marketType: MarketType;
+  region?: Region;
+  assetType?: AssetType;
   positionSide: PositionSide;
   instrumentId: string;
   instrumentName: string;
   instrumentCode: string;
   currency?: Currency;
+  exchange?: string;
   exchangeRate?: number;
   quantity: number;
   averageEntryPrice: number;

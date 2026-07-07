@@ -5,6 +5,9 @@ export function calculateSpotHoldings(trades: Trade[], prices: Record<string, In
     instrumentId: string;
     instrumentName: string;
     instrumentCode: string;
+    region?: "domestic" | "overseas";
+    assetType?: "stock" | "etf" | "etn" | "index_futures" | "stock_futures";
+    exchange?: string;
     buyQuantity: number;
     sellQuantity: number;
     buyAmount: number;
@@ -19,6 +22,9 @@ export function calculateSpotHoldings(trades: Trade[], prices: Record<string, In
         instrumentId: trade.instrumentId,
         instrumentName: trade.instrumentName,
         instrumentCode: trade.instrumentCode,
+        region: trade.region ?? "domestic",
+        assetType: trade.assetType,
+        exchange: trade.exchange,
         buyQuantity: 0,
         sellQuantity: 0,
         buyAmount: 0,
@@ -57,6 +63,9 @@ export function calculateSpotHoldings(trades: Trade[], prices: Record<string, In
         instrumentId: item.instrumentId,
         instrumentName: item.instrumentName,
         instrumentCode: item.instrumentCode,
+        region: item.region,
+        assetType: item.assetType,
+        exchange: item.exchange,
         currency: item.currency,
         exchangeRate: item.exchangeRate,
         quantity,
@@ -114,6 +123,9 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
     instrumentId: string;
     instrumentName: string;
     instrumentCode: string;
+    region?: "domestic" | "overseas";
+    assetType?: "stock" | "etf" | "etn" | "index_futures" | "stock_futures";
+    exchange?: string;
     positionSide: PositionSide;
     entryContracts: number;
     exitContracts: number;
@@ -132,6 +144,9 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
         instrumentId: trade.instrumentId,
         instrumentName: trade.instrumentName,
         instrumentCode: trade.instrumentCode,
+        region: trade.region ?? "domestic",
+        assetType: trade.assetType,
+        exchange: trade.exchange,
         positionSide: side,
         entryContracts: 0,
         exitContracts: 0,
@@ -178,6 +193,9 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
         instrumentId: item.instrumentId,
         instrumentName: item.instrumentName,
         instrumentCode: item.instrumentCode,
+        region: item.region,
+        assetType: item.assetType,
+        exchange: item.exchange,
         currency: item.currency,
         exchangeRate: item.exchangeRate,
         quantity,

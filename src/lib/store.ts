@@ -125,6 +125,7 @@ function normalizeTrade(trade: Partial<Trade>): Trade {
     instrumentCode: trade.instrumentCode ?? "",
     region: trade.region,
     currency: trade.currency ?? "KRW",
+    exchange: trade.exchange,
     exchangeRate: trade.exchangeRate,
     positionSide: trade.positionSide ?? "long",
     tradeAction: trade.tradeAction ?? "entry_exit",
