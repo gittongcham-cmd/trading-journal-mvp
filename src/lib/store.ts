@@ -210,11 +210,11 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
   }
 }
 
-export async function syncLocalStateToCloud(): Promise<void> {
-  if (typeof window === "undefined" || !isAdminMode()) return;
+export async function syncLocalStateToCloud(): Promise<boolean> {
+  if (typeof window === "undefined" || !isAdminMode()) return false;
   const password = getAccessPassword();
-  if (!password) return;
-  await fetch("/api/app-data", {
+  if (!password) return false;
+  const response = await fetch("/api/app-data", {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -225,5 +225,6 @@ export async function syncLocalStateToCloud(): Promise<void> {
       accountBalanceSnapshots: loadAccountBalanceSnapshots(),
       instrumentPrices: loadInstrumentPrices()
     })
-  }).catch(() => undefined);
+  }).catch(() => null);
+  return Boolean(response?.ok);
 }

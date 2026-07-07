@@ -19,12 +19,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [market, setMarket] = useState<MarketFilter>("all");
   const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
   const admin = isAdminMode();
 
   async function refreshCloudData() {
     const password = getAccessPassword();
     if (!password) return;
     setSyncing(true);
+    setSyncMessage("");
     await hydrateLocalStateFromCloud(password).catch(() => undefined);
     setSyncing(false);
     window.location.reload();
@@ -32,8 +34,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   async function uploadLocalData() {
     setSyncing(true);
-    await syncLocalStateToCloud().catch(() => undefined);
+    setSyncMessage("");
+    const ok = await syncLocalStateToCloud().catch(() => false);
     setSyncing(false);
+    setSyncMessage(ok ? "클라우드 저장 완료" : "저장 실패: Supabase 환경변수나 secret key를 확인하세요.");
   }
 
   return (
@@ -67,6 +71,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="mt-1 text-xs font-semibold text-slate-700">2026-07-03 15:30</div>
             <button className="btn btn-secondary mt-3 w-full" type="button" onClick={refreshCloudData} disabled={syncing}>데이터 새로고침</button>
             {admin && <button className="btn btn-primary mt-2 w-full" type="button" onClick={uploadLocalData} disabled={syncing}>현재 데이터 클라우드 저장</button>}
+            {syncMessage && <div className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-700">{syncMessage}</div>}
           </div>
         </div>
       </aside>
@@ -97,6 +102,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
               <div className="text-xs font-semibold text-slate-500">마지막 업데이트 15:30</div>
               <button className="btn btn-secondary" type="button" onClick={refreshCloudData} disabled={syncing}>새로고침</button>
+              {syncMessage && <span className="text-xs font-bold text-slate-500">{syncMessage}</span>}
               {admin && <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>}
             </div>
           </div>
