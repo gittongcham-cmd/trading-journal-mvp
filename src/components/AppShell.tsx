@@ -15,11 +15,17 @@ const navItems = [
   { href: "/stats", label: "통계/복기" }
 ];
 
+const LAST_SYNC_KEY = "trading-journal-last-cloud-sync";
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [market, setMarket] = useState<MarketFilter>("all");
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(() => {
+    if (typeof window === "undefined") return "저장 전";
+    return window.localStorage.getItem(LAST_SYNC_KEY) ?? "저장 전";
+  });
   const admin = isAdminMode();
 
   async function refreshCloudData() {
@@ -37,7 +43,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setSyncMessage("");
     const ok = await syncLocalStateToCloud().catch(() => false);
     setSyncing(false);
-    setSyncMessage(ok ? "클라우드 저장 완료" : "저장 실패: Supabase 환경변수나 secret key를 확인하세요.");
+    if (ok) {
+      const updatedAt = formatLastUpdated(new Date());
+      window.localStorage.setItem(LAST_SYNC_KEY, updatedAt);
+      setLastUpdated(updatedAt);
+      setSyncMessage("클라우드 저장 완료");
+      window.alert("저장이 완료되었습니다.");
+      return;
+    }
+    setSyncMessage("저장 실패: Supabase 환경변수나 secret key를 확인하세요.");
+    window.alert("저장에 실패했습니다. Supabase 환경변수나 secret key를 확인해주세요.");
   }
 
   return (
@@ -68,7 +83,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="text-xs font-bold text-slate-500">기준 계좌</div>
             <div className="mt-1 text-sm font-black text-slate-900">선물/현물 통합 계좌</div>
             <div className="mt-3 text-xs text-slate-500">최근 동기화</div>
-            <div className="mt-1 text-xs font-semibold text-slate-700">2026-07-03 15:30</div>
+            <div className="mt-1 text-xs font-semibold text-slate-700">{lastUpdated}</div>
             <button className="btn btn-secondary mt-3 w-full" type="button" onClick={refreshCloudData} disabled={syncing}>데이터 새로고침</button>
             {admin && <button className="btn btn-primary mt-2 w-full" type="button" onClick={uploadLocalData} disabled={syncing}>현재 데이터 클라우드 저장</button>}
             {syncMessage && <div className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-700">{syncMessage}</div>}
@@ -100,7 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <input className="input max-w-40" type="date" defaultValue="2026-06-28" />
                 <input className="input max-w-40" type="date" defaultValue="2026-07-03" />
               </div>
-              <div className="text-xs font-semibold text-slate-500">마지막 업데이트 15:30</div>
+              <div className="text-xs font-semibold text-slate-500">마지막 업데이트 {lastUpdated}</div>
               <button className="btn btn-secondary" type="button" onClick={refreshCloudData} disabled={syncing}>새로고침</button>
               {syncMessage && <span className="text-xs font-bold text-slate-500">{syncMessage}</span>}
               {admin && <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>}
@@ -116,4 +131,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
     </div>
   );
+}
+
+function formatLastUpdated(date: Date): string {
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(date);
 }
