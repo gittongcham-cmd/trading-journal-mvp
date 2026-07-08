@@ -59,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-slate-50 lg:flex">
       <aside className="border-b border-slate-200 bg-white lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-72 lg:flex-col lg:border-b-0 lg:border-r">
         <div className="px-5 py-5">
-          <div className="text-lg font-black text-ink">Trading Journal</div>
+          <div className="text-xl font-black text-ink">굼톨굼톨 매매일지</div>
           <div className="mt-1 text-xs text-slate-500">KOSPI 현물 + KOSPI200 선물</div>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-3 pb-3 lg:block lg:flex-1 lg:space-y-1">

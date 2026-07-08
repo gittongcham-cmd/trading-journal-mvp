@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { isAdminMode } from "@/lib/auth";
 import { calculateWinRate } from "@/lib/calculations";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
@@ -424,14 +424,45 @@ function ChartPanel({ title, description, children }: { title: string; descripti
 
 function TopBar({ title, rows, positive = false }: { title: string; rows: PositionHoldingSummary[]; positive?: boolean }) {
   const data = rows.map((position) => ({ name: position.instrumentName, pnl: position.unrealizedPnl ?? 0, abs: Math.abs(position.unrealizedPnl ?? 0) }));
-  return <div><div className="mb-2 text-sm font-black text-slate-700">{title}</div>{data.length ? <ResponsiveContainer width="100%" height={220}><BarChart data={data} layout="vertical" margin={{ left: 10, right: 32 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" hide /><YAxis dataKey="name" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(_value, _name, item) => formatKRW(Number((item.payload as { pnl?: number } | undefined)?.pnl ?? 0))} /><Bar dataKey="abs" fill={positive ? "#ef4444" : "#3b82f6"} label={(props) => {
-    const payload = props.payload as { pnl?: number } | undefined;
-    const x = Number(props.x ?? 0);
-    const y = Number(props.y ?? 0);
-    const width = Number(props.width ?? 0);
-    const height = Number(props.height ?? 0);
-    return <text x={x + width + 6} y={y + height / 2 + 4} fontSize={11} fontWeight={700} fill={positive ? "#ef4444" : "#3b82f6"}>{formatKRW(payload?.pnl ?? 0)}</text>;
-  }} /></BarChart></ResponsiveContainer> : <div className="rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">표시할 종목이 아직 없습니다.</div>}</div>;
+  const maxAbs = Math.max(...data.map((item) => item.abs), 1);
+  const colorClass = positive ? "text-red-500" : "text-blue-500";
+  const barClass = positive ? "bg-red-500" : "bg-blue-500";
+
+  return (
+    <div>
+      <div className="mb-3 text-sm font-black text-slate-700">{title}</div>
+      {data.length ? (
+        <div className="space-y-3">
+          {data.map((item) => {
+            const width = Math.max((item.abs / maxAbs) * 100, 6);
+            return (
+              <div
+                key={`${title}-${item.name}`}
+                className="grid gap-2 rounded-xl px-1 py-1 sm:grid-cols-[minmax(0,1fr)_150px] sm:items-center"
+                title={`${item.name} ${formatSignedKRW(item.pnl)}`}
+              >
+                <div className="min-w-0">
+                  <div className="mb-1 break-keep text-xs font-bold leading-5 text-slate-600">{item.name}</div>
+                  <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                    <div className={`h-3 rounded-full ${barClass}`} style={{ width: `${width}%` }} />
+                  </div>
+                </div>
+                <div className={`whitespace-nowrap text-right text-sm font-black tabular-nums ${colorClass}`}>
+                  {formatSignedKRW(item.pnl)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">표시할 종목이 아직 없습니다.</div>
+      )}
+    </div>
+  );
+}
+
+function formatSignedKRW(value: number): string {
+  return `${value > 0 ? "+" : ""}${formatKRW(value)}`;
 }
 
 function ReturnBadge({ value }: { value: number }) {
