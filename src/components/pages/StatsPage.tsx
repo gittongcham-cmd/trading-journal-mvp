@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { calculateWinRate } from "@/lib/calculations";
-import { formatKRW, formatNumber, formatPercent, pnlClass } from "@/lib/format";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { buildCumulativePnlSeries, buildMonthlyMarketPnl, calculateWinRate, getClosedTrades } from "@/lib/calculations";
+import { formatKRW, formatNumber, formatPercent, formatSignedKRW, pnlClass } from "@/lib/format";
 import { calculateOpenPositions, summarizeOpenPositions } from "@/lib/holdings";
 import { loadInstrumentPrices, loadTrades } from "@/lib/store";
 import type { EmotionTag, Trade } from "@/types/trading";
@@ -25,7 +25,7 @@ export function StatsPage() {
   useEffect(() => { setTrades(loadTrades()); }, []);
 
   const prices = loadInstrumentPrices();
-  const closed = trades.filter((trade) => trade.tradeAction !== "entry" || trade.exitPrice !== undefined);
+  const closed = getClosedTrades(trades);
   const profits = closed.filter((trade) => trade.realizedPnl > 0);
   const losses = closed.filter((trade) => trade.realizedPnl < 0);
   const realizedPnl = closed.reduce((sum, trade) => sum + trade.realizedPnl, 0);
@@ -40,12 +40,10 @@ export function StatsPage() {
   const averageProfit = profits.reduce((sum, trade) => sum + trade.realizedPnl, 0) / Math.max(profits.length, 1);
   const averageLoss = losses.reduce((sum, trade) => sum + trade.realizedPnl, 0) / Math.max(losses.length, 1);
   const profitLossRatio = Math.abs(averageProfit / (averageLoss || -1));
-  const monthly = useMemo(() => aggregate(closed, (trade) => trade.tradeDate.slice(0, 7)), [closed]);
-  const weekly = useMemo(() => aggregate(closed, (trade) => toWeekLabel(trade.tradeDate)), [closed]);
-  const byMarket = [
-    { name: "현물", value: Math.abs(spotRealizedPnl), raw: spotRealizedPnl },
-    { name: "선물", value: Math.abs(futuresRealizedPnl), raw: futuresRealizedPnl }
-  ];
+  const monthly = useMemo(() => aggregate(closed, (trade) => realizedDate(trade).slice(0, 7)), [closed]);
+  const weekly = useMemo(() => aggregate(closed, (trade) => toWeekLabel(realizedDate(trade))), [closed]);
+  const cumulativePnlSeries = useMemo(() => buildCumulativePnlSeries(trades), [trades]);
+  const monthlyMarketPnl = useMemo(() => buildMonthlyMarketPnl(trades), [trades]);
   const byInstrument = useMemo(() => aggregate(closed, (trade) => trade.instrumentName).sort((a, b) => b.pnl - a.pnl), [closed]);
   const emotionStats = (Object.keys(emotionLabels) as EmotionTag[]).map((tag) => {
     const tagged = closed.filter((trade) => trade.emotionTags.includes(tag));
@@ -90,10 +88,34 @@ export function StatsPage() {
       </section>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Chart title="월별 실현손익"><BarChart data={monthly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl">{monthly.map((item) => <Cell key={item.name} fill={item.pnl >= 0 ? "#ef4444" : "#3b82f6"} />)}</Bar></BarChart></Chart>
-        <Chart title="주별 실현손익"><BarChart data={weekly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl">{weekly.map((item) => <Cell key={item.name} fill={item.pnl >= 0 ? "#ef4444" : "#3b82f6"} />)}</Bar></BarChart></Chart>
-        <Chart title="현물/선물 손익 비교"><PieChart><Pie data={byMarket} dataKey="value" nameKey="name" outerRadius={90} label={(item) => `${item.name} ${formatKRW(item.raw)}`}><Cell fill="#14b8a6" /><Cell fill="#2563eb" /></Pie><Tooltip formatter={(_value, _name, item) => formatKRW(Number(item.payload.raw))} /></PieChart></Chart>
-        <Chart title="종목별 성과 TOP 5"><BarChart data={byInstrument.slice(0, 5)}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatKRW(Number(value))} /><Bar dataKey="pnl" fill="#0f766e" /></BarChart></Chart>
+        <Chart title="현물 / 선물 누적수익 추이" description="청산 완료된 거래의 실현손익을 기준으로 현물과 선물의 누적수익을 비교해요.">
+          {cumulativePnlSeries.length ? (
+            <LineChart data={cumulativePnlSeries}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 10000)}만`} width={56} />
+              <Tooltip formatter={(value, name) => [formatSignedKRW(Number(value)), name]} />
+              <Line type="monotone" dataKey="total" name="전체 누적수익" stroke="#0f172a" strokeWidth={3} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="spot" name="현물 누적수익" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="futures" name="선물 누적수익" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+            </LineChart>
+          ) : <EmptyChartMessage />}
+        </Chart>
+        <Chart title="월별 현물 / 선물 실현손익" description="월별로 현물과 선물에서 확정된 손익을 나눠서 보여줘요.">
+          {monthlyMarketPnl.length ? (
+            <BarChart data={monthlyMarketPnl}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month" />
+              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 10000)}만`} width={56} />
+              <Tooltip formatter={(value, name) => [formatSignedKRW(Number(value)), name]} />
+              <Bar dataKey="spot" name="현물 실현손익" fill="#ef4444" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="futures" name="선물 실현손익" fill="#2563eb" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          ) : <EmptyChartMessage />}
+        </Chart>
+        <Chart title="월별 전체 실현손익"><BarChart data={monthly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatSignedKRW(Number(value))} /><Bar dataKey="pnl">{monthly.map((item) => <Cell key={item.name} fill={item.pnl >= 0 ? "#ef4444" : "#3b82f6"} />)}</Bar></BarChart></Chart>
+        <Chart title="주별 실현손익"><BarChart data={weekly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatSignedKRW(Number(value))} /><Bar dataKey="pnl">{weekly.map((item) => <Cell key={item.name} fill={item.pnl >= 0 ? "#ef4444" : "#3b82f6"} />)}</Bar></BarChart></Chart>
+        <Chart title="종목별 성과 TOP 5"><BarChart data={byInstrument.slice(0, 5)}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatSignedKRW(Number(value))} /><Bar dataKey="pnl" fill="#0f766e" /></BarChart></Chart>
       </div>
 
       <section className="grid gap-4 xl:grid-cols-2">
@@ -158,6 +180,10 @@ function toWeekLabel(dateText: string) {
   return `${date.getMonth() + 1}월 ${Math.ceil(date.getDate() / 7)}주`;
 }
 
+function realizedDate(trade: Trade): string {
+  return trade.exitDate ?? trade.tradeDate;
+}
+
 function averageByMarket(trades: Trade[], marketType: "spot" | "futures") {
   const filtered = trades.filter((trade) => trade.marketType === marketType);
   return filtered.reduce((sum, trade) => sum + trade.realizedPnl, 0) / Math.max(filtered.length, 1);
@@ -175,6 +201,10 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   return <div className="rounded-xl border border-slate-200 p-4"><div className="label">{label}</div><div className="mt-2 text-lg font-black text-slate-900">{value}</div></div>;
 }
 
-function Chart({ title, children }: { title: string; children: React.ReactElement }) {
-  return <div className="card p-4"><div className="mb-3 text-lg font-black">{title}</div><ResponsiveContainer width="100%" height={260}>{children}</ResponsiveContainer></div>;
+function EmptyChartMessage() {
+  return <div className="flex h-full items-center justify-center rounded-xl bg-slate-50 p-5 text-center text-sm font-semibold leading-6 text-slate-500">아직 청산 완료된 거래가 없어 누적수익 그래프를 만들 수 없어요.<br />매도/청산 기록을 추가하면 현물과 선물 수익 추이를 볼 수 있어요.</div>;
+}
+
+function Chart({ title, description, children }: { title: string; description?: string; children: React.ReactElement }) {
+  return <div className="card p-4"><div className="text-lg font-black">{title}</div>{description && <p className="mt-1 text-sm text-slate-500">{description}</p>}<div className="mt-3 h-[280px]"><ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer></div></div>;
 }

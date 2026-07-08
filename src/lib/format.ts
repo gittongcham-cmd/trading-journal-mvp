@@ -2,6 +2,10 @@ export function formatKRW(value: number): string {
   return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Math.round(value))}원`;
 }
 
+export function formatSignedKRW(value: number): string {
+  return `${value > 0 ? "+" : ""}${formatKRW(value)}`;
+}
+
 export function formatNumber(value: number, digits = 2): string {
   return new Intl.NumberFormat("ko-KR", {
     maximumFractionDigits: digits

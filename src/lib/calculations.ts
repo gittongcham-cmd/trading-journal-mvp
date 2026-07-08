@@ -89,3 +89,51 @@ export function calculateWinRate(trades: Trade[]): number {
   if (!closed.length) return 0;
   return (closed.filter((trade) => trade.realizedPnl > 0).length / closed.length) * 100;
 }
+
+export function getClosedTrades(trades: Trade[]): Trade[] {
+  return trades.filter((trade) => trade.tradeAction !== "entry" || trade.exitPrice !== undefined);
+}
+
+function realizedDate(trade: Trade): string {
+  return trade.exitDate ?? trade.tradeDate;
+}
+
+export function buildCumulativePnlSeries(trades: Trade[]) {
+  let total = 0;
+  let spot = 0;
+  let futures = 0;
+  return getClosedTrades(trades)
+    .slice()
+    .sort((a, b) => realizedDate(a).localeCompare(realizedDate(b)))
+    .map((trade) => {
+      if (trade.marketType === "spot") {
+        spot += trade.realizedPnl;
+      } else {
+        futures += trade.realizedPnl;
+      }
+      total = spot + futures;
+      return {
+        date: realizedDate(trade),
+        label: realizedDate(trade).replaceAll("-", "."),
+        total,
+        spot,
+        futures
+      };
+    });
+}
+
+export function buildMonthlyMarketPnl(trades: Trade[]) {
+  const map = new Map<string, { month: string; spot: number; futures: number; total: number }>();
+  getClosedTrades(trades).forEach((trade) => {
+    const month = realizedDate(trade).slice(0, 7);
+    const current = map.get(month) ?? { month, spot: 0, futures: 0, total: 0 };
+    if (trade.marketType === "spot") {
+      current.spot += trade.realizedPnl;
+    } else {
+      current.futures += trade.realizedPnl;
+    }
+    current.total = current.spot + current.futures;
+    map.set(month, current);
+  });
+  return Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
+}

@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { sumNegative, sumPositive } from "@/lib/accountBalances";
 import { isAdminMode } from "@/lib/auth";
-import { calculateWinRate } from "@/lib/calculations";
-import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
+import { buildCumulativePnlSeries, buildMonthlyMarketPnl, calculateWinRate, getClosedTrades } from "@/lib/calculations";
+import { formatKRW, formatPercent, formatSignedKRW, pnlClass } from "@/lib/format";
 import { calculateOpenPositions, summarizeOpenPositions } from "@/lib/holdings";
 import { loadAccountBalanceSnapshots, loadInstrumentPrices, loadTrades } from "@/lib/store";
 import type { AccountBalanceSnapshot, PositionHoldingSummary, Trade } from "@/types/trading";
@@ -29,16 +29,14 @@ export function DashboardPage() {
   const positions = useMemo(() => calculateOpenPositions(trades, prices), [trades, prices]);
   const positionSummary = useMemo(() => summarizeOpenPositions(positions), [positions]);
   const today = new Date().toISOString().slice(0, 10);
-  const closedTrades = trades.filter((trade) => trade.tradeAction !== "entry" || trade.exitPrice !== undefined);
+  const closedTrades = getClosedTrades(trades);
   const todayRealizedPnl = closedTrades.filter((trade) => trade.tradeDate === today).reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const totalRealizedPnl = sumPnl(closedTrades);
   const spotRealizedPnl = sumPnl(closedTrades.filter((trade) => trade.marketType === "spot"));
   const futuresRealizedPnl = sumPnl(closedTrades.filter((trade) => trade.marketType === "futures"));
   const weeklyAccounts = useMemo(() => toWeeklyBalance(accounts), [accounts]);
-  const marketAmountShare = [
-    { name: "현물", value: Math.abs(positionSummary.spotCurrentAmount), raw: positionSummary.spotCurrentAmount },
-    { name: "선물", value: Math.abs(positionSummary.futuresCurrentAmount), raw: positionSummary.futuresCurrentAmount }
-  ].filter((item) => item.value > 0);
+  const cumulativePnlSeries = useMemo(() => buildCumulativePnlSeries(trades), [trades]);
+  const monthlyMarketPnl = useMemo(() => buildMonthlyMarketPnl(trades), [trades]);
 
   return (
     <div className="space-y-6">
@@ -80,7 +78,7 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
         <ChartCard title="계좌금액 추이" description="주별 마지막 계좌 잔고를 사용합니다.">
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart data={weeklyAccounts}>
@@ -92,20 +90,39 @@ export function DashboardPage() {
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
-        <ChartCard title="현물 / 선물 총액 비중" description="현재가가 입력된 보유 포지션 금액 기준입니다.">
-          {marketAmountShare.length ? (
+        <ChartCard title="현물 / 선물 누적수익 추이" description="청산 완료된 거래의 실현손익을 기준으로 현물과 선물의 누적수익을 비교해요.">
+          {cumulativePnlSeries.length ? (
             <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie data={marketAmountShare} dataKey="value" nameKey="name" innerRadius={60} outerRadius={94} label={(item) => `${item.name} ${formatKRW(item.raw)}`}>
-                  <Cell fill="#14b8a6" />
-                  <Cell fill="#2563eb" />
-                </Pie>
-                <Tooltip formatter={(_value, _name, item) => formatKRW(Number(item.payload.raw))} />
-              </PieChart>
+              <LineChart data={cumulativePnlSeries}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 10000)}만`} width={56} />
+                <Tooltip formatter={(value, name) => [formatSignedKRW(Number(value)), name]} labelFormatter={(label) => `${label}`} />
+                <Line type="monotone" dataKey="total" name="전체 누적수익" stroke="#0f172a" strokeWidth={3} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="spot" name="현물 누적수익" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="futures" name="선물 누적수익" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
             </ResponsiveContainer>
-          ) : <EmptyState text="현재가를 입력하면 현물/선물 총액 비중을 볼 수 있어요." />}
+          ) : <EmptyState text="아직 청산 완료된 거래가 없어 누적수익 그래프를 만들 수 없어요. 매도/청산 기록을 추가하면 현물과 선물 수익 추이를 볼 수 있어요." />}
         </ChartCard>
       </div>
+
+      <ChartCard title="월별 현물 / 선물 실현손익" description="월별로 현물과 선물에서 확정된 손익을 나눠서 보여줘요.">
+        {monthlyMarketPnl.length ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={monthlyMarketPnl}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="month" />
+              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 10000)}만`} width={56} />
+              <Tooltip formatter={(value, name) => [formatSignedKRW(Number(value)), name]} />
+              <Bar dataKey="spot" name="현물 실현손익" fill="#ef4444" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="futures" name="선물 실현손익" fill="#2563eb" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState text="아직 청산 완료된 거래가 없어 월별 손익 그래프를 만들 수 없어요. + 거래 추가 또는 보유 포지션의 매도/청산을 기록해 주세요." />
+        )}
+        </ChartCard>
 
       <section className="card overflow-hidden">
         <div className="border-b border-slate-100 p-5">
