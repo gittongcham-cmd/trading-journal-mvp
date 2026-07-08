@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { isAdminMode } from "@/lib/auth";
-import { calculateFuturesFee, calculateReturnRate, calculateWinRate } from "@/lib/calculations";
-import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
+import { buildCumulativePnlSeries, buildMonthlyMarketPnl, calculateFuturesFee, calculateReturnRate, calculateWinRate } from "@/lib/calculations";
+import { formatKRW, formatPercent, formatSignedKRW, pnlClass } from "@/lib/format";
 import { calculateOpenPositions, summarizeOpenPositions } from "@/lib/holdings";
 import { updateManualPrice } from "@/lib/quotes";
 import { loadInstrumentPrices, loadTrades, saveTrades } from "@/lib/store";
@@ -67,7 +67,8 @@ export function TradesPage() {
   const positions = useMemo(() => calculateOpenPositions(trades, prices), [trades, prices]);
   const positionSummary = useMemo(() => summarizeOpenPositions(positions), [positions]);
   const positionShare = useMemo(() => toPositionShare(positions), [positions]);
-  const categoryShare = useMemo(() => toCategoryShare(positions), [positions]);
+  const cumulativePnlSeries = useMemo(() => buildCumulativePnlSeries(trades), [trades]);
+  const monthlyMarketPnl = useMemo(() => buildMonthlyMarketPnl(trades), [trades]);
   const profitTop = useMemo(() => positions.filter((position) => position.unrealizedPnl !== undefined && position.unrealizedPnl > 0).sort((a, b) => (b.unrealizedPnl ?? 0) - (a.unrealizedPnl ?? 0)).slice(0, 5), [positions]);
   const lossTop = useMemo(() => positions.filter((position) => position.unrealizedPnl !== undefined && position.unrealizedPnl < 0).sort((a, b) => (a.unrealizedPnl ?? 0) - (b.unrealizedPnl ?? 0)).slice(0, 5), [positions]);
   const missingPricePositions = positions.filter((position) => position.currentPrice === undefined);
@@ -295,19 +296,42 @@ export function TradesPage() {
             </ChartPanel>
           </div>
 
-          <ChartPanel title="자산 구성" description="현재 보유 자산이 국내/해외/ETF/선물에 어떻게 나뉘어 있는지 보여줘요.">
-            <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie data={categoryShare} dataKey="value" nameKey="name" innerRadius={54} outerRadius={86}>
-                    {categoryShare.map((item, index) => <Cell key={item.name} fill={chartColors[index % chartColors.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(value) => formatKRW(Number(value))} />
-                </PieChart>
-              </ResponsiveContainer>
-              <LegendList rows={categoryShare} />
-            </div>
-          </ChartPanel>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <ChartPanel title="현물 / 선물 누적수익 추이" description="청산 완료된 거래의 실현손익을 기준으로 현물과 선물의 누적수익을 비교해요.">
+              {cumulativePnlSeries.length ? (
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={cumulativePnlSeries}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                    <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 10000)}만`} width={56} />
+                    <Tooltip formatter={(value, name) => [formatSignedKRW(Number(value)), name]} />
+                    <Line type="monotone" dataKey="total" name="전체 누적수익" stroke="#0f172a" strokeWidth={3} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="spot" name="현물 누적수익" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="futures" name="선물 누적수익" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <ChartEmptyState />
+              )}
+            </ChartPanel>
+
+            <ChartPanel title="월별 현물 / 선물 실현손익" description="월별로 현물과 선물에서 확정된 손익을 나눠서 보여줘요.">
+              {monthlyMarketPnl.length ? (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={monthlyMarketPnl}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" />
+                    <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 10000)}만`} width={56} />
+                    <Tooltip formatter={(value, name) => [formatSignedKRW(Number(value)), name]} />
+                    <Bar dataKey="spot" name="현물 실현손익" fill="#ef4444" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="futures" name="선물 실현손익" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <ChartEmptyState />
+              )}
+            </ChartPanel>
+          </div>
 
           {missingPricePositions.length > 0 && (
             <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold text-blue-800">
@@ -611,19 +635,6 @@ function toPositionShare(positions: PositionHoldingSummary[]) {
   return merged.map((row) => ({ ...row, percent: total ? (row.value / total) * 100 : 0 }));
 }
 
-function toCategoryShare(positions: PositionHoldingSummary[]) {
-  const map = new Map<string, number>();
-  positions.forEach((position) => {
-    const category = getPositionCategory(position);
-    map.set(category, (map.get(category) ?? 0) + Math.abs(positionAmount(position)));
-  });
-  const total = Array.from(map.values()).reduce((sum, value) => sum + value, 0);
-  return ["국내주식", "국내ETF", "해외주식", "해외ETF", "선물"].map((name) => {
-    const value = map.get(name) ?? 0;
-    return { name, value, raw: value, percent: total ? (value / total) * 100 : 0 };
-  });
-}
-
 function getPositionCategory(position: PositionHoldingSummary): string {
   if (position.marketType === "futures") return "선물";
   const overseas = position.currency === "USD" || position.region === "overseas";
@@ -647,6 +658,15 @@ function LegendList({ rows }: { rows: { name: string; raw: number; percent: numb
 
 function ChartPanel({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="text-base font-black text-slate-950">{title}</h3><p className="mt-1 text-sm text-slate-500">{description}</p><div className="mt-4">{children}</div></section>;
+}
+
+function ChartEmptyState() {
+  return (
+    <div className="flex min-h-[240px] items-center justify-center rounded-xl bg-slate-50 p-5 text-center text-sm font-semibold leading-6 text-slate-500">
+      아직 청산 완료된 거래가 없어 누적수익 그래프를 만들 수 없어요.<br />
+      매도/청산 기록을 추가하면 현물과 선물 수익 추이를 볼 수 있어요.
+    </div>
+  );
 }
 
 function TopBar({ title, rows, positive = false }: { title: string; rows: PositionHoldingSummary[]; positive?: boolean }) {
@@ -686,10 +706,6 @@ function TopBar({ title, rows, positive = false }: { title: string; rows: Positi
       )}
     </div>
   );
-}
-
-function formatSignedKRW(value: number): string {
-  return `${value > 0 ? "+" : ""}${formatKRW(value)}`;
 }
 
 function ReturnBadge({ value }: { value: number }) {
