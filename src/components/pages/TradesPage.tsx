@@ -4,13 +4,34 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { isAdminMode } from "@/lib/auth";
-import { calculateWinRate } from "@/lib/calculations";
+import { calculateFuturesFee, calculateReturnRate, calculateWinRate } from "@/lib/calculations";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
 import { calculateOpenPositions, summarizeOpenPositions } from "@/lib/holdings";
 import { updateManualPrice } from "@/lib/quotes";
 import { loadInstrumentPrices, loadTrades, saveTrades } from "@/lib/store";
-import type { Currency, InstrumentPrice, MarketFilter, PositionHoldingSummary, Trade } from "@/types/trading";
+import type { Currency, EmotionTag, InstrumentPrice, MarketFilter, PositionHoldingSummary, Trade, TradeAction } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
+
+const emotionOptions: { value: EmotionTag; label: string }[] = [
+  { value: "confidence", label: "자신감" },
+  { value: "anxiety", label: "불안" },
+  { value: "impatience", label: "조급함" },
+  { value: "greed", label: "욕심" },
+  { value: "fear", label: "공포" },
+  { value: "calm", label: "평온" },
+  { value: "regret", label: "후회" },
+  { value: "conviction", label: "확신" }
+];
+
+type ExitDraft = {
+  date: string;
+  quantity: string;
+  price: string;
+  fee: string;
+  memo: string;
+  exitReason: string;
+  emotionTags: EmotionTag[];
+};
 
 export function TradesPage() {
   const admin = isAdminMode();
@@ -22,7 +43,10 @@ export function TradesPage() {
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [priceDraft, setPriceDraft] = useState("");
   const [editingPosition, setEditingPosition] = useState<PositionHoldingSummary | null>(null);
-  const [positionDraft, setPositionDraft] = useState({ code: "", exchange: "", currency: "KRW" as Currency, currentPrice: "", memo: "" });
+  const [positionDraft, setPositionDraft] = useState({ code: "", exchange: "", currency: "KRW" as Currency, memo: "" });
+  const [closingPosition, setClosingPosition] = useState<PositionHoldingSummary | null>(null);
+  const [exitDraft, setExitDraft] = useState<ExitDraft>(createExitDraft());
+  const [exitError, setExitError] = useState("");
 
   useEffect(() => {
     const loaded = loadTrades();
@@ -73,7 +97,6 @@ export function TradesPage() {
       code: position.instrumentCode,
       exchange: position.exchange ?? "",
       currency: position.currency ?? "KRW",
-      currentPrice: position.currentPrice ? position.currentPrice.toLocaleString("ko-KR") : "",
       memo: ""
     });
   }
@@ -88,16 +111,109 @@ export function TradesPage() {
     );
     saveTrades(nextTrades);
     setTrades(nextTrades);
-    const currentPrice = Number(positionDraft.currentPrice.replace(/,/g, ""));
-    if (currentPrice) {
-      setPrices(updateManualPrice({
-        instrumentCode: nextCode,
-        instrumentName: editingPosition.instrumentName,
-        marketType: editingPosition.marketType,
-        currentPrice
-      }));
-    }
     setEditingPosition(null);
+  }
+
+  function beginExit(position: PositionHoldingSummary) {
+    setClosingPosition(position);
+    setExitDraft(createExitDraft(position));
+    setExitError("");
+  }
+
+  function toggleExitEmotion(tag: EmotionTag) {
+    setExitDraft((current) => ({
+      ...current,
+      emotionTags: current.emotionTags.includes(tag)
+        ? current.emotionTags.filter((item) => item !== tag)
+        : [...current.emotionTags, tag]
+    }));
+  }
+
+  function saveExitTrade() {
+    if (!admin || !closingPosition) return;
+    const quantity = parseNumber(exitDraft.quantity);
+    const exitPrice = parseNumber(exitDraft.price);
+    const manualFee = parseNumber(exitDraft.fee);
+
+    if (!quantity) {
+      setExitError(closingPosition.marketType === "futures" ? "청산계약수를 입력해 주세요." : "매도수량을 입력해 주세요.");
+      return;
+    }
+    if (!exitPrice) {
+      setExitError(closingPosition.marketType === "futures" ? "청산가를 입력해 주세요." : "매도가를 입력해 주세요.");
+      return;
+    }
+    if (quantity > closingPosition.quantity + 0.0000001) {
+      setExitError(closingPosition.marketType === "futures" ? "청산계약수는 현재 보유계약수를 초과할 수 없어요." : "보유수량보다 많이 매도할 수 없어요.");
+      return;
+    }
+    if (closingPosition.marketType === "futures" && !Number.isInteger(quantity)) {
+      setExitError("선물 청산계약수는 정수로 입력해 주세요.");
+      return;
+    }
+
+    const multiplier = closingPosition.multiplier ?? 250000;
+    const fee = closingPosition.marketType === "futures"
+      ? calculateFuturesFee({
+          entryPrice: closingPosition.averageEntryPrice,
+          exitPrice,
+          contractCount: quantity,
+          multiplier
+        })
+      : manualFee;
+    const tradeAmount = closingPosition.marketType === "futures"
+      ? closingPosition.averageEntryPrice * multiplier * quantity
+      : closingPosition.averageEntryPrice * quantity;
+    const direction = closingPosition.positionSide === "long" ? 1 : -1;
+    const realizedPnl = closingPosition.marketType === "futures"
+      ? closingPosition.positionSide === "long"
+        ? (exitPrice - closingPosition.averageEntryPrice) * multiplier * quantity - fee
+        : (closingPosition.averageEntryPrice - exitPrice) * multiplier * quantity - fee
+      : (exitPrice - closingPosition.averageEntryPrice) * quantity * direction - fee;
+    const action: TradeAction = quantity >= closingPosition.quantity - 0.0000001 ? "full_exit" : "partial_exit";
+    const now = new Date().toISOString();
+    const nextTrade: Trade = {
+      id: `trade-${Date.now()}`,
+      tradeDate: exitDraft.date,
+      marketType: closingPosition.marketType,
+      assetType: closingPosition.assetType ?? (closingPosition.marketType === "futures" ? "index_futures" : "stock"),
+      instrumentId: closingPosition.instrumentId,
+      instrumentName: closingPosition.instrumentName,
+      instrumentCode: closingPosition.instrumentCode,
+      region: closingPosition.region,
+      currency: closingPosition.currency ?? "KRW",
+      exchange: closingPosition.exchange,
+      exchangeRate: closingPosition.exchangeRate,
+      positionSide: closingPosition.positionSide,
+      tradeAction: action,
+      entryPrice: closingPosition.averageEntryPrice,
+      exitDate: exitDraft.date,
+      exitPrice,
+      quantity: closingPosition.marketType === "spot" ? quantity : undefined,
+      contractCount: closingPosition.marketType === "futures" ? quantity : undefined,
+      multiplier: closingPosition.marketType === "futures" ? multiplier : undefined,
+      tradeAmount,
+      fee,
+      realizedPnl,
+      unrealizedPnl: 0,
+      cumulativePnl: 0,
+      marketCumulativePnl: 0,
+      returnRate: calculateReturnRate(realizedPnl, tradeAmount),
+      entryReason: "보유 포지션 매도/청산",
+      exitReason: exitDraft.exitReason,
+      emotionTags: exitDraft.emotionTags.length ? exitDraft.emotionTags : ["calm"],
+      reviewMemo: exitDraft.memo,
+      createdAt: now,
+      updatedAt: now
+    };
+    const nextTrades = [...trades, nextTrade];
+    saveTrades(nextTrades);
+    const reloaded = loadTrades();
+    setTrades(reloaded);
+    setSelected(reloaded.find((trade) => trade.id === nextTrade.id) ?? nextTrade);
+    setClosingPosition(null);
+    setExitDraft(createExitDraft());
+    setExitError("");
   }
 
   return (
@@ -200,9 +316,9 @@ export function TradesPage() {
           )}
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[1280px] w-full text-sm">
+          <table className="min-w-[1420px] w-full text-sm">
             <thead className="bg-slate-50 text-xs font-bold text-slate-500">
-              <tr>{["시장", "종목", "종목코드/티커", "보유수량/계약수", "평균진입가", "투자금액/명목금액", "현재가", "현재금액", "미실현손익", "평가수익률", "현재가 업데이트", "수정"].map((head, index) => <th key={head} className={`px-4 py-3 ${index >= 3 && index <= 10 ? "text-right" : "text-left"}`}>{head}</th>)}</tr>
+              <tr>{["시장", "종목", "종목코드/티커", "보유수량/계약수", "평균진입가", "투자금액/명목금액", "현재가", "현재금액", "미실현손익", "평가수익률", "현재가 업데이트", "액션"].map((head, index) => <th key={head} className={`px-4 py-3 ${index >= 3 && index <= 10 ? "text-right" : "text-left"}`}>{head}</th>)}</tr>
             </thead>
             <tbody>
               {!positions.length && <tr><td className="px-4 py-6 text-center text-sm font-semibold text-slate-500" colSpan={12}>아직 보유 중인 포지션이 없습니다. 신규 진입 거래를 남기면 이곳에 표시됩니다.</td></tr>}
@@ -230,7 +346,13 @@ export function TradesPage() {
                   <td className={`px-4 py-3 text-right font-black ${position.unrealizedPnl === undefined ? "text-slate-400" : pnlClass(position.unrealizedPnl)}`}>{position.unrealizedPnl === undefined ? "-" : formatMoney(position.unrealizedPnl, position.currency)}</td>
                   <td className="px-4 py-3 text-right">{position.returnRate === undefined ? "-" : <ReturnBadge value={position.returnRate} />}</td>
                   <td className="px-4 py-3 text-right text-slate-500">{position.updatedAt ? new Date(position.updatedAt).toLocaleString("ko-KR") : "-"}</td>
-                  <td className="px-4 py-3"><button className="btn btn-secondary" type="button" onClick={() => beginPositionEdit(position)} disabled={!admin}>수정</button></td>
+                  <td className="px-4 py-3">
+                    <div className="flex min-w-72 flex-wrap gap-2">
+                      <button className="btn btn-secondary px-3 py-2 text-xs" type="button" onClick={() => beginPriceEdit(position)} disabled={!admin}>현재가 수정</button>
+                      <button className="btn btn-primary px-3 py-2 text-xs" type="button" onClick={() => beginExit(position)} disabled={!admin}>{position.marketType === "futures" ? "청산" : "매도"}</button>
+                      <button className="btn btn-secondary px-3 py-2 text-xs" type="button" onClick={() => beginPositionEdit(position)} disabled={!admin}>종목정보 수정</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -262,7 +384,7 @@ export function TradesPage() {
                     <td className="px-4 py-3 font-bold">{trade.instrumentName}</td>
                     <td className="px-4 py-3">{trade.instrumentCode}</td>
                     <td className="px-4 py-3">{trade.currency ?? "KRW"}</td>
-                    <td className="px-4 py-3">{trade.positionSide === "long" ? "매수" : "매도"}</td>
+                    <td className="px-4 py-3">{tradeSideLabel(trade)}</td>
                     <td className="px-4 py-3 text-right">{formatMoney(trade.entryPrice, trade.currency)}</td>
                     <td className="px-4 py-3 text-right">{trade.marketType === "spot" ? `${formatQuantity(trade.quantity ?? 0)}주` : `${formatQuantity(trade.contractCount ?? 0)}계약`}</td>
                     <td className="px-4 py-3 text-right">{trade.currency === "USD" ? (trade.exchangeRate ? trade.exchangeRate.toLocaleString("ko-KR") : "환율 입력 필요") : "-"}</td>
@@ -289,7 +411,7 @@ export function TradesPage() {
             <MarketPill market={selected.marketType} />
           </div>
           <div className="grid gap-3 md:grid-cols-4">
-            <Detail label="매수/매도" value={selected.positionSide === "long" ? "매수" : "매도"} />
+            <Detail label="매수/매도" value={tradeSideLabel(selected)} />
             <Detail label="진입 시점" value={selected.entryDate ?? "-"} />
             <Detail label="청산 시점" value={selected.exitDate ?? "-"} />
             <Detail label="거래금액" value={formatKRW(selected.tradeAmount)} alignRight />
@@ -321,12 +443,65 @@ export function TradesPage() {
               <EditInput label="종목코드/티커" value={positionDraft.code} onChange={(value) => setPositionDraft((current) => ({ ...current, code: value }))} />
               <EditInput label="거래소" value={positionDraft.exchange} onChange={(value) => setPositionDraft((current) => ({ ...current, exchange: value }))} />
               <label><div className="label mb-1.5">통화</div><select className="input" value={positionDraft.currency} onChange={(event) => setPositionDraft((current) => ({ ...current, currency: event.target.value as Currency }))}><option value="KRW">KRW</option><option value="USD">USD</option></select></label>
-              <EditInput label="현재가" value={positionDraft.currentPrice} onChange={(value) => setPositionDraft((current) => ({ ...current, currentPrice: formatNumberInput(value) }))} />
               <label className="md:col-span-2"><div className="label mb-1.5">메모</div><textarea className="input min-h-20" value={positionDraft.memo} onChange={(event) => setPositionDraft((current) => ({ ...current, memo: event.target.value }))} /></label>
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button className="btn btn-secondary" type="button" onClick={() => setEditingPosition(null)}>취소</button>
               <button className="btn btn-primary" type="button" onClick={savePositionEdit}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {closingPosition && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="card max-h-[90vh] w-full max-w-3xl overflow-y-auto p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black">{closingPosition.marketType === "futures" ? "청산 기록" : "매도 기록"}</h2>
+                <p className="mt-1 text-sm text-slate-500">현재가는 평가용입니다. 실제 매도/청산가는 이곳에 직접 입력해 실현손익으로 확정해 주세요.</p>
+              </div>
+              <button className="btn btn-secondary" type="button" onClick={() => setClosingPosition(null)}>닫기</button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-4">
+              <Detail label="종목" value={closingPosition.instrumentName} />
+              <Detail label="보유수량/계약수" value={closingPosition.marketType === "spot" ? `${formatQuantity(closingPosition.quantity)}주` : `${formatQuantity(closingPosition.quantity)}계약`} alignRight />
+              <Detail label="평균진입가" value={closingPosition.marketType === "spot" ? formatMoney(closingPosition.averageEntryPrice, closingPosition.currency) : `${closingPosition.averageEntryPrice.toLocaleString("ko-KR")}pt`} alignRight />
+              <Detail label="현재 평가손익" value={closingPosition.unrealizedPnl === undefined ? "현재가 입력 필요" : formatMoney(closingPosition.unrealizedPnl, closingPosition.currency)} className={closingPosition.unrealizedPnl === undefined ? "text-slate-500" : pnlClass(closingPosition.unrealizedPnl)} alignRight />
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <EditInput label={closingPosition.marketType === "futures" ? "청산일" : "매도일"} type="date" value={exitDraft.date} onChange={(value) => setExitDraft((current) => ({ ...current, date: value }))} />
+              <EditInput label={closingPosition.marketType === "futures" ? "청산계약수" : "매도수량"} value={exitDraft.quantity} onChange={(value) => setExitDraft((current) => ({ ...current, quantity: formatNumberInput(value) }))} />
+              <EditInput label={closingPosition.marketType === "futures" ? "청산가" : "매도가"} value={exitDraft.price} onChange={(value) => setExitDraft((current) => ({ ...current, price: formatNumberInput(value) }))} />
+              <EditInput label={closingPosition.marketType === "futures" ? "수수료 자동계산" : "수수료"} value={closingPosition.marketType === "futures" ? formatKRW(getExitPreview(closingPosition, exitDraft).fee) : exitDraft.fee} onChange={(value) => setExitDraft((current) => ({ ...current, fee: formatNumberInput(value) }))} disabled={closingPosition.marketType === "futures"} />
+              <label className="md:col-span-2"><div className="label mb-1.5">청산이유</div><input className="input" value={exitDraft.exitReason} onChange={(event) => setExitDraft((current) => ({ ...current, exitReason: event.target.value }))} placeholder="왜 매도/청산했는지 남겨두세요" /></label>
+              <label className="md:col-span-2"><div className="label mb-1.5">메모</div><textarea className="input min-h-20" value={exitDraft.memo} onChange={(event) => setExitDraft((current) => ({ ...current, memo: event.target.value }))} /></label>
+            </div>
+
+            <div className="mt-4">
+              <div className="label mb-2">감정 태그</div>
+              <div className="flex flex-wrap gap-2">
+                {emotionOptions.map((tag) => (
+                  <button
+                    key={tag.value}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-black ${exitDraft.emotionTags.includes(tag.value) ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}
+                    type="button"
+                    onClick={() => toggleExitEmotion(tag.value)}
+                  >
+                    {tag.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <ExitPreview position={closingPosition} draft={exitDraft} />
+            {exitError && <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-700">{exitError}</div>}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button className="btn btn-secondary" type="button" onClick={() => setClosingPosition(null)}>취소</button>
+              <button className="btn btn-primary" type="button" onClick={saveExitTrade}>저장</button>
             </div>
           </div>
         </div>
@@ -364,6 +539,51 @@ function formatNumberInput(value: string): string {
   const [integer, decimal] = cleaned.split(".");
   const formatted = Number(integer || 0).toLocaleString("ko-KR");
   return decimal === undefined ? formatted : `${formatted}.${decimal}`;
+}
+
+function parseNumber(value: string): number {
+  return Number(value.replace(/,/g, "")) || 0;
+}
+
+function todayString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function createExitDraft(position?: PositionHoldingSummary): ExitDraft {
+  return {
+    date: todayString(),
+    quantity: position ? formatQuantity(position.quantity) : "",
+    price: position?.currentPrice ? position.currentPrice.toLocaleString("ko-KR") : "",
+    fee: "0",
+    memo: "",
+    exitReason: "",
+    emotionTags: ["calm"]
+  };
+}
+
+function getExitPreview(position: PositionHoldingSummary, draft: ExitDraft) {
+  const quantity = parseNumber(draft.quantity);
+  const exitPrice = parseNumber(draft.price);
+  const manualFee = parseNumber(draft.fee);
+  const multiplier = position.multiplier ?? 250000;
+  const fee = position.marketType === "futures" && quantity && exitPrice
+    ? calculateFuturesFee({ entryPrice: position.averageEntryPrice, exitPrice, contractCount: quantity, multiplier })
+    : manualFee;
+  const direction = position.positionSide === "long" ? 1 : -1;
+  const realizedPnl = quantity && exitPrice
+    ? position.marketType === "futures"
+      ? position.positionSide === "long"
+        ? (exitPrice - position.averageEntryPrice) * multiplier * quantity - fee
+        : (position.averageEntryPrice - exitPrice) * multiplier * quantity - fee
+      : (exitPrice - position.averageEntryPrice) * quantity * direction - fee
+    : 0;
+  const remainingQuantity = Math.max(position.quantity - quantity, 0);
+  const remainingAmount = position.currentPrice === undefined
+    ? undefined
+    : position.marketType === "futures"
+      ? position.currentPrice * multiplier * remainingQuantity
+      : position.currentPrice * remainingQuantity;
+  return { quantity, exitPrice, fee, realizedPnl, remainingQuantity, remainingAmount };
 }
 
 function formatQuantity(value: number): string {
@@ -412,6 +632,13 @@ function getPositionCategory(position: PositionHoldingSummary): string {
   if (overseas) return "해외주식";
   if (etf) return "국내ETF";
   return "국내주식";
+}
+
+function tradeSideLabel(trade: Trade): string {
+  if (trade.tradeAction === "partial_exit") return trade.marketType === "futures" ? "부분청산" : "부분매도";
+  if (trade.tradeAction === "full_exit" || trade.tradeAction === "exit") return trade.marketType === "futures" ? "청산" : "매도";
+  if (trade.tradeAction === "entry_exit") return "진입+청산";
+  return trade.positionSide === "long" ? "매수" : "매도";
 }
 
 function LegendList({ rows }: { rows: { name: string; raw: number; percent: number }[] }) {
@@ -472,6 +699,17 @@ function ReturnBadge({ value }: { value: number }) {
   return <span className={pnlClass(value)} style={{ backgroundColor: bg, borderRadius: 999, padding: "4px 8px", fontWeight: 900 }}>{formatPercent(value)}</span>;
 }
 
-function EditInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label><div className="label mb-1.5">{label}</div><input className="input" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+function ExitPreview({ position, draft }: { position: PositionHoldingSummary; draft: ExitDraft }) {
+  const preview = getExitPreview(position, draft);
+  return (
+    <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <KpiCard label="예상 실현손익" value={formatMoney(preview.realizedPnl, position.currency)} tone="pnl" caption={position.marketType === "futures" ? `수수료 ${formatKRW(preview.fee)} 반영` : preview.fee ? `수수료 ${formatKRW(preview.fee)} 반영` : "평균단가 기준"} />
+      <KpiCard label={position.marketType === "futures" ? "청산 후 남은 계약" : "매도 후 남은 수량"} value={position.marketType === "futures" ? `${formatQuantity(preview.remainingQuantity)}계약` : `${formatQuantity(preview.remainingQuantity)}주`} caption="부분 매도/청산 후 보유분" />
+      <KpiCard label="남은 평가금액" value={preview.remainingAmount === undefined ? "현재가 입력 필요" : formatMoney(preview.remainingAmount, position.currency)} caption="현재가 기준 평가용" />
+    </div>
+  );
+}
+
+function EditInput({ label, value, onChange, type = "text", disabled = false }: { label: string; value: string; onChange: (value: string) => void; type?: string; disabled?: boolean }) {
+  return <label><div className="label mb-1.5">{label}</div><input className="input" type={type} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} /></label>;
 }

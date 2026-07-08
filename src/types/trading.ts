@@ -4,7 +4,7 @@ export type Region = "domestic" | "overseas";
 export type Currency = "KRW" | "USD";
 export type AssetType = "stock" | "etf" | "etn" | "index_futures" | "stock_futures";
 export type PositionSide = "long" | "short";
-export type TradeAction = "entry" | "exit" | "entry_exit";
+export type TradeAction = "entry" | "exit" | "entry_exit" | "partial_exit" | "full_exit";
 export type EmotionTag = "confidence" | "anxiety" | "impatience" | "greed" | "fear" | "calm" | "regret" | "conviction";
 
 export interface Instrument {
