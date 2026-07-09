@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { isAdminMode } from "@/lib/auth";
-import { buildCumulativePnlSeries, buildMonthlyMarketPnl, calculateFuturesFee, calculateReturnRate, calculateWinRate } from "@/lib/calculations";
+import { buildCumulativePnlSeries, calculateFuturesFee, calculateReturnRate, calculateWinRate } from "@/lib/calculations";
 import { formatKRW, formatPercent, formatSignedKRW, pnlClass } from "@/lib/format";
 import { calculateOpenPositions, summarizeOpenPositions } from "@/lib/holdings";
 import { updateManualPrice } from "@/lib/quotes";
@@ -68,7 +68,8 @@ export function TradesPage() {
   const positionSummary = useMemo(() => summarizeOpenPositions(positions), [positions]);
   const positionShare = useMemo(() => toPositionShare(positions), [positions]);
   const cumulativePnlSeries = useMemo(() => buildCumulativePnlSeries(trades), [trades]);
-  const monthlyMarketPnl = useMemo(() => buildMonthlyMarketPnl(trades), [trades]);
+  const spotPnlSeries = useMemo(() => toSingleMarketPnlSeries(trades, "spot"), [trades]);
+  const futuresPnlSeries = useMemo(() => toSingleMarketPnlSeries(trades, "futures"), [trades]);
   const profitTop = useMemo(() => positions.filter((position) => position.unrealizedPnl !== undefined && position.unrealizedPnl > 0).sort((a, b) => (b.unrealizedPnl ?? 0) - (a.unrealizedPnl ?? 0)).slice(0, 5), [positions]);
   const lossTop = useMemo(() => positions.filter((position) => position.unrealizedPnl !== undefined && position.unrealizedPnl < 0).sort((a, b) => (a.unrealizedPnl ?? 0) - (b.unrealizedPnl ?? 0)).slice(0, 5), [positions]);
   const missingPricePositions = positions.filter((position) => position.currentPrice === undefined);
@@ -296,7 +297,7 @@ export function TradesPage() {
             </ChartPanel>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             <ChartPanel title="현물 / 선물 누적수익 추이" description="청산 완료된 거래의 실현손익을 기준으로 현물과 선물의 누적수익을 비교해요.">
               {cumulativePnlSeries.length ? (
                 <ResponsiveContainer width="100%" height={280}>
@@ -315,20 +316,19 @@ export function TradesPage() {
               )}
             </ChartPanel>
 
-            <ChartPanel title="월별 현물 / 선물 실현손익" description="월별로 현물과 선물에서 확정된 손익을 나눠서 보여줘요.">
-              {monthlyMarketPnl.length ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={monthlyMarketPnl}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="month" />
-                    <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 10000)}만`} width={56} />
-                    <Tooltip formatter={(value, name) => [formatSignedKRW(Number(value)), name]} />
-                    <Bar dataKey="spot" name="현물 실현손익" fill="#ef4444" radius={[6, 6, 0, 0]} />
-                    <Bar dataKey="futures" name="선물 실현손익" fill="#2563eb" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+            <ChartPanel title="현물 수익 추이" description="청산 완료된 현물 거래의 실현손익만 보여줘요.">
+              {spotPnlSeries.length ? (
+                <SingleMarketPnlChart data={spotPnlSeries} dataKey="spot" name="현물 누적수익" stroke="#ef4444" />
               ) : (
-                <ChartEmptyState />
+                <ChartEmptyState text="아직 청산 완료된 현물 거래가 없어요." />
+              )}
+            </ChartPanel>
+
+            <ChartPanel title="선물 수익 추이" description="청산 완료된 선물 거래의 실현손익만 보여줘요.">
+              {futuresPnlSeries.length ? (
+                <SingleMarketPnlChart data={futuresPnlSeries} dataKey="futures" name="선물 누적수익" stroke="#2563eb" />
+              ) : (
+                <ChartEmptyState text="아직 청산 완료된 선물 거래가 없어요." />
               )}
             </ChartPanel>
           </div>
@@ -635,6 +635,10 @@ function toPositionShare(positions: PositionHoldingSummary[]) {
   return merged.map((row) => ({ ...row, percent: total ? (row.value / total) * 100 : 0 }));
 }
 
+function toSingleMarketPnlSeries(trades: Trade[], marketType: "spot" | "futures") {
+  return buildCumulativePnlSeries(trades.filter((trade) => trade.marketType === marketType));
+}
+
 function getPositionCategory(position: PositionHoldingSummary): string {
   if (position.marketType === "futures") return "선물";
   const overseas = position.currency === "USD" || position.region === "overseas";
@@ -657,14 +661,27 @@ function LegendList({ rows }: { rows: { name: string; raw: number; percent: numb
 }
 
 function ChartPanel({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  return <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="text-base font-black text-slate-950">{title}</h3><p className="mt-1 text-sm text-slate-500">{description}</p><div className="mt-4">{children}</div></section>;
+  return <section className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-4"><h3 className="text-base font-black text-slate-950">{title}</h3><p className="mt-1 min-h-10 text-sm text-slate-500">{description}</p><div className="mt-4 flex-1">{children}</div></section>;
 }
 
-function ChartEmptyState() {
+function SingleMarketPnlChart({ data, dataKey, name, stroke }: { data: ReturnType<typeof buildCumulativePnlSeries>; dataKey: "spot" | "futures"; name: string; stroke: string }) {
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+        <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+        <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 10000)}만`} width={56} />
+        <Tooltip formatter={(value, tooltipName) => [formatSignedKRW(Number(value)), tooltipName]} />
+        <Line type="monotone" dataKey={dataKey} name={name} stroke={stroke} strokeWidth={3} dot={{ r: 3 }} />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+function ChartEmptyState({ text = "매도/청산 기록을 추가하면 수익 추이를 볼 수 있어요." }: { text?: string }) {
   return (
     <div className="flex min-h-[240px] items-center justify-center rounded-xl bg-slate-50 p-5 text-center text-sm font-semibold leading-6 text-slate-500">
-      아직 청산 완료된 거래가 없어 누적수익 그래프를 만들 수 없어요.<br />
-      매도/청산 기록을 추가하면 현물과 선물 수익 추이를 볼 수 있어요.
+      {text}
     </div>
   );
 }
