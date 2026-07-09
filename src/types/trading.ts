@@ -125,6 +125,30 @@ export interface InstrumentPrice {
   updatedAt: string;
 }
 
+export type TradingRuleCategory = "공통" | "진입" | "청산" | "손절" | "감정" | "현물" | "선물";
+
+export interface TradingRule {
+  id: string;
+  title: string;
+  description: string;
+  category: TradingRuleCategory;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DailyRuleCheck {
+  id: string;
+  checkDate: string;
+  checkedRuleIds: string[];
+  isCompleted: boolean;
+  checkedAt?: string;
+  memo: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SpotHoldingSummary {
   instrumentId: string;
   instrumentName: string;

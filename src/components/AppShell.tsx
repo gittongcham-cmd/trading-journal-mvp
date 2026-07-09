@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { getAccessPassword, isAdminMode } from "@/lib/auth";
-import { hydrateLocalStateFromCloud, syncLocalStateToCloud } from "@/lib/store";
+import { hydrateLocalStateFromCloud, isDailyRulesCompletedToday, syncLocalStateToCloud } from "@/lib/store";
 import type { MarketFilter } from "@/types/trading";
 
 const navItems = [
+  { href: "/daily-rules", label: "굼톨매매 원칙" },
   { href: "/", label: "대시보드" },
   { href: "/trades", label: "매매일지" },
   { href: "/accounts", label: "계좌기록" },
@@ -19,6 +20,7 @@ const LAST_SYNC_KEY = "trading-journal-last-cloud-sync";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [market, setMarket] = useState<MarketFilter>("all");
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
@@ -27,6 +29,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return window.localStorage.getItem(LAST_SYNC_KEY) ?? "저장 전";
   });
   const admin = isAdminMode();
+
+  useEffect(() => {
+    const exceptions = ["/daily-rules", "/trading-rules"];
+    if (exceptions.some((path) => pathname.startsWith(path))) return;
+    if (!isDailyRulesCompletedToday()) {
+      router.replace("/daily-rules");
+    }
+  }, [pathname, router]);
 
   async function refreshCloudData() {
     const password = getAccessPassword();
