@@ -91,7 +91,7 @@ export function calculateWinRate(trades: Trade[]): number {
 }
 
 export function getClosedTrades(trades: Trade[]): Trade[] {
-  return trades.filter((trade) => trade.tradeAction !== "entry" || trade.exitPrice !== undefined);
+  return trades.filter((trade) => trade.tradeAction !== "entry" || trade.exitPrice !== undefined || trade.realizedPnl !== 0);
 }
 
 function realizedDate(trade: Trade): string {
