@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { isAdminMode } from "@/lib/auth";
 import { buildCumulativePnlSeries, calculateFuturesFee, calculateReturnRate, calculateWinRate } from "@/lib/calculations";
@@ -51,6 +52,27 @@ type ImportPreviewRow = {
   status: string;
 };
 
+type RecordDateFilter = "all" | "this_month" | "last_month" | "month" | "custom";
+type RecordStatusFilter = "all" | "open" | "closed";
+type RecordPnlFilter = "all" | "profit" | "loss" | "zero";
+type RecordSideFilter = "all" | "buy" | "sell" | "long" | "short";
+type RecordAssetFilter = "all" | "stock" | "etf" | "futures";
+type RecordSortKey = "date" | "instrumentName" | "marketType" | "entryPrice" | "exitPrice" | "realizedPnl" | "status";
+type SortDirection = "asc" | "desc";
+
+type RecordFilters = {
+  dateFilter: RecordDateFilter;
+  month: string;
+  fromDate: string;
+  toDate: string;
+  market: MarketFilter;
+  status: RecordStatusFilter;
+  pnl: RecordPnlFilter;
+  search: string;
+  side: RecordSideFilter;
+  asset: RecordAssetFilter;
+};
+
 export function TradesPage() {
   const admin = isAdminMode();
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -73,6 +95,19 @@ export function TradesPage() {
   const [importError, setImportError] = useState("");
   const [importRows, setImportRows] = useState<ImportPreviewRow[]>([]);
   const [hideImportAfterSave, setHideImportAfterSave] = useState(false);
+  const [recordDateFilter, setRecordDateFilter] = useState<RecordDateFilter>("all");
+  const [recordMonth, setRecordMonth] = useState("");
+  const [recordFromDate, setRecordFromDate] = useState("");
+  const [recordToDate, setRecordToDate] = useState("");
+  const [recordMarket, setRecordMarket] = useState<MarketFilter>("all");
+  const [recordStatus, setRecordStatus] = useState<RecordStatusFilter>("all");
+  const [recordPnl, setRecordPnl] = useState<RecordPnlFilter>("all");
+  const [recordSearch, setRecordSearch] = useState("");
+  const [recordSide, setRecordSide] = useState<RecordSideFilter>("all");
+  const [recordAsset, setRecordAsset] = useState<RecordAssetFilter>("all");
+  const [recordSortKey, setRecordSortKey] = useState<RecordSortKey>("date");
+  const [recordSortDirection, setRecordSortDirection] = useState<SortDirection>("desc");
+  const [collapsedMonths, setCollapsedMonths] = useState<string[]>([]);
 
   useEffect(() => {
     const loaded = loadTrades();
@@ -100,6 +135,36 @@ export function TradesPage() {
   const profitTop = useMemo(() => positions.filter((position) => position.unrealizedPnl !== undefined && position.unrealizedPnl > 0).sort((a, b) => (b.unrealizedPnl ?? 0) - (a.unrealizedPnl ?? 0)).slice(0, 5), [positions]);
   const lossTop = useMemo(() => positions.filter((position) => position.unrealizedPnl !== undefined && position.unrealizedPnl < 0).sort((a, b) => (a.unrealizedPnl ?? 0) - (b.unrealizedPnl ?? 0)).slice(0, 5), [positions]);
   const missingPricePositions = positions.filter((position) => position.currentPrice === undefined);
+  const availableRecordMonths = useMemo(() => getAvailableMonths(trades), [trades]);
+  const recordFilters = useMemo<RecordFilters>(() => ({
+    dateFilter: recordDateFilter,
+    month: recordMonth,
+    fromDate: recordFromDate,
+    toDate: recordToDate,
+    market: recordMarket,
+    status: recordStatus,
+    pnl: recordPnl,
+    search: recordSearch,
+    side: recordSide,
+    asset: recordAsset
+  }), [recordDateFilter, recordMonth, recordFromDate, recordToDate, recordMarket, recordStatus, recordPnl, recordSearch, recordSide, recordAsset]);
+  const recordFiltered = useMemo(() => filterRecordTrades(trades, recordFilters), [trades, recordFilters]);
+  const recordSorted = useMemo(() => sortRecordTrades(recordFiltered, recordSortKey, recordSortDirection), [recordFiltered, recordSortKey, recordSortDirection]);
+  const recordGroups = useMemo(() => groupRecordTrades(recordSorted), [recordSorted]);
+  const recordSummary = useMemo(() => summarizeRecordTrades(recordFiltered), [recordFiltered]);
+
+  function toggleRecordSort(key: RecordSortKey) {
+    if (recordSortKey === key) {
+      setRecordSortDirection((current) => current === "asc" ? "desc" : "asc");
+      return;
+    }
+    setRecordSortKey(key);
+    setRecordSortDirection(key === "date" ? "desc" : "asc");
+  }
+
+  function toggleRecordMonth(month: string) {
+    setCollapsedMonths((current) => current.includes(month) ? current.filter((item) => item !== month) : [...current, month]);
+  }
 
   function beginPriceEdit(position: PositionHoldingSummary) {
     setEditingCode(position.instrumentCode);
@@ -481,7 +546,153 @@ function updateImportRow(rowId: string, key: keyof ImportPreviewRow, value: stri
         </div>
       </section>
 
-      <div className="card overflow-hidden">
+      <section className="card overflow-hidden">
+        <div className="border-b border-slate-100 p-5">
+          <h2 className="text-lg font-black">거래 기록</h2>
+          <p className="mt-1 text-sm text-slate-500">구글시트에서 가져온 선물 거래까지 포함해, 보유 중인 거래와 청산 완료 거래를 나눠서 확인합니다.</p>
+        </div>
+
+        <div className="border-b border-slate-100 bg-slate-50/60 p-5">
+          <div className="grid gap-3 lg:grid-cols-4 xl:grid-cols-7">
+            <FilterSelect label="기간" value={recordDateFilter} onChange={(value) => setRecordDateFilter(value as RecordDateFilter)}>
+              <option value="all">전체</option>
+              <option value="this_month">이번 달</option>
+              <option value="last_month">지난 달</option>
+              <option value="month">월별 선택</option>
+              <option value="custom">직접 기간</option>
+            </FilterSelect>
+            {recordDateFilter === "month" && (
+              <label>
+                <div className="label mb-1.5">월 선택</div>
+                <select className="input" value={recordMonth} onChange={(event) => setRecordMonth(event.target.value)}>
+                  <option value="">월 선택</option>
+                  {availableRecordMonths.map((month) => <option key={month} value={month}>{month.replace("-", ".")}</option>)}
+                </select>
+              </label>
+            )}
+            {recordDateFilter === "custom" && (
+              <>
+                <label><div className="label mb-1.5">시작일</div><input className="input" type="date" value={recordFromDate} onChange={(event) => setRecordFromDate(event.target.value)} /></label>
+                <label><div className="label mb-1.5">종료일</div><input className="input" type="date" value={recordToDate} onChange={(event) => setRecordToDate(event.target.value)} /></label>
+              </>
+            )}
+            <FilterSelect label="시장" value={recordMarket} onChange={(value) => setRecordMarket(value as MarketFilter)}>
+              <option value="all">전체</option>
+              <option value="spot">현물</option>
+              <option value="futures">선물</option>
+            </FilterSelect>
+            <FilterSelect label="상태" value={recordStatus} onChange={(value) => setRecordStatus(value as RecordStatusFilter)}>
+              <option value="all">전체</option>
+              <option value="open">보유 중</option>
+              <option value="closed">청산 완료</option>
+            </FilterSelect>
+            <FilterSelect label="손익" value={recordPnl} onChange={(value) => setRecordPnl(value as RecordPnlFilter)}>
+              <option value="all">전체</option>
+              <option value="profit">수익 거래</option>
+              <option value="loss">손실 거래</option>
+              <option value="zero">0원 거래</option>
+            </FilterSelect>
+            <FilterSelect label="포지션" value={recordSide} onChange={(value) => setRecordSide(value as RecordSideFilter)}>
+              <option value="all">전체</option>
+              <option value="buy">매수</option>
+              <option value="sell">매도</option>
+              <option value="long">롱</option>
+              <option value="short">숏</option>
+            </FilterSelect>
+            <FilterSelect label="상품구분" value={recordAsset} onChange={(value) => setRecordAsset(value as RecordAssetFilter)}>
+              <option value="all">전체</option>
+              <option value="stock">주식</option>
+              <option value="etf">ETF</option>
+              <option value="futures">선물</option>
+            </FilterSelect>
+            <label className="lg:col-span-2 xl:col-span-2">
+              <div className="label mb-1.5">종목 검색</div>
+              <input className="input" value={recordSearch} onChange={(event) => setRecordSearch(event.target.value)} placeholder="종목명, 코드, 티커 검색" />
+            </label>
+          </div>
+        </div>
+
+        <div className="grid gap-3 border-b border-slate-100 p-5 md:grid-cols-2 xl:grid-cols-4">
+          <KpiCard label="필터 내 거래수" value={`${recordSummary.count.toLocaleString("ko-KR")}건`} caption="현재 조건에 맞는 거래" />
+          <KpiCard label="필터 내 실현손익" value={formatKRW(recordSummary.realizedPnl)} tone="pnl" caption="청산 완료 거래 기준" />
+          <KpiCard label="수익 / 손실 거래" value={`${recordSummary.profitCount}건 / ${recordSummary.lossCount}건`} caption={`0원 거래 ${recordSummary.zeroCount}건`} />
+          <KpiCard label="필터 내 승률" value={formatPercent(recordSummary.winRate)} caption="0원 거래 제외" />
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {!recordGroups.length && (
+            <div className="p-8 text-center">
+              <div className="text-base font-black text-slate-800">조건에 맞는 거래기록이 없어요.</div>
+              <p className="mt-2 text-sm font-semibold text-slate-500">필터를 변경하거나 거래내역을 추가해 주세요.</p>
+            </div>
+          )}
+          {recordGroups.map((group) => {
+            const collapsed = collapsedMonths.includes(group.month);
+            return (
+              <div key={group.month}>
+                <button className="flex w-full flex-col gap-3 bg-white px-5 py-4 text-left hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between" type="button" onClick={() => toggleRecordMonth(group.month)}>
+                  <div>
+                    <div className="text-base font-black text-slate-950">{collapsed ? "▶" : "▼"} {formatMonthLabel(group.month)}</div>
+                    <div className="mt-1 text-xs font-bold text-slate-500">월별로 거래를 접고 펼쳐서 볼 수 있어요.</div>
+                  </div>
+                  <div className="grid gap-2 text-sm sm:grid-cols-5 lg:min-w-[720px]">
+                    <MonthlyChip label="거래" value={`${group.summary.count}건`} />
+                    <MonthlyChip label="실현손익" value={formatKRW(group.summary.realizedPnl)} className={pnlClass(group.summary.realizedPnl)} />
+                    <MonthlyChip label="선물" value={formatKRW(group.summary.futuresPnl)} className={pnlClass(group.summary.futuresPnl)} />
+                    <MonthlyChip label="현물" value={formatKRW(group.summary.spotPnl)} className={pnlClass(group.summary.spotPnl)} />
+                    <MonthlyChip label="승률" value={formatPercent(group.summary.winRate)} />
+                  </div>
+                </button>
+                {!collapsed && (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[1120px] w-full text-sm">
+                      <thead className="bg-slate-50 text-xs font-bold text-slate-500">
+                        <tr>
+                          <SortableHead label="날짜" sortKey="date" currentKey={recordSortKey} direction={recordSortDirection} onSort={toggleRecordSort} />
+                          <SortableHead label="시장" sortKey="marketType" currentKey={recordSortKey} direction={recordSortDirection} onSort={toggleRecordSort} />
+                          <SortableHead label="종목" sortKey="instrumentName" currentKey={recordSortKey} direction={recordSortDirection} onSort={toggleRecordSort} />
+                          <th className="px-4 py-3 text-left">포지션</th>
+                          <SortableHead label="진입가" sortKey="entryPrice" currentKey={recordSortKey} direction={recordSortDirection} onSort={toggleRecordSort} alignRight />
+                          <SortableHead label="청산가" sortKey="exitPrice" currentKey={recordSortKey} direction={recordSortDirection} onSort={toggleRecordSort} alignRight />
+                          <th className="px-4 py-3 text-right">수량/계약수</th>
+                          <SortableHead label="실현손익" sortKey="realizedPnl" currentKey={recordSortKey} direction={recordSortDirection} onSort={toggleRecordSort} alignRight />
+                          <SortableHead label="상태" sortKey="status" currentKey={recordSortKey} direction={recordSortDirection} onSort={toggleRecordSort} />
+                          <th className="px-4 py-3 text-left">메모</th>
+                          <th className="px-4 py-3 text-left">액션</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.trades.map((trade) => (
+                          <tr key={trade.id} className={`cursor-pointer border-t border-slate-100 hover:bg-blue-50/40 ${selected?.id === trade.id ? "bg-blue-50" : ""}`} onClick={() => setSelected(trade)}>
+                            <td className="px-4 py-3 font-semibold text-slate-700">{trade.tradeDate}</td>
+                            <td className="px-4 py-3"><MarketPill market={trade.marketType} /></td>
+                            <td className="px-4 py-3"><div className="font-black text-slate-900">{trade.instrumentName || "-"}</div><div className="mt-0.5 text-xs font-semibold text-slate-400">{trade.instrumentCode || "코드 없음"}</div></td>
+                            <td className="px-4 py-3"><PositionPill trade={trade} /></td>
+                            <td className="px-4 py-3 text-right font-semibold">{formatEntryPrice(trade)}</td>
+                            <td className="px-4 py-3 text-right font-semibold">{trade.exitPrice === undefined ? "-" : formatExitPrice(trade)}</td>
+                            <td className="px-4 py-3 text-right font-semibold">{formatTradeVolume(trade)}</td>
+                            <td className={`px-4 py-3 text-right font-black ${isOpenTrade(trade) ? "text-slate-400" : pnlClass(trade.realizedPnl)}`}>{isOpenTrade(trade) ? "-" : formatMoney(trade.realizedPnl, trade.currency)}</td>
+                            <td className="px-4 py-3"><TradeStatusPill trade={trade} /></td>
+                            <td className="max-w-[220px] px-4 py-3"><div className="truncate font-semibold text-slate-600">{trade.reviewMemo || trade.exitReason || trade.entryReason || "-"}</div></td>
+                            <td className="px-4 py-3">
+                              <div className="flex min-w-44 flex-wrap gap-2">
+                                <button className="btn btn-secondary px-3 py-2 text-xs" type="button" onClick={(event) => { event.stopPropagation(); setSelected(trade); }}>상세보기</button>
+                                {admin && <button className="btn btn-secondary px-3 py-2 text-xs text-blue-600" type="button" onClick={(event) => { event.stopPropagation(); setDeleteTarget(trade); }}>삭제</button>}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <div className="hidden">
         <div className="border-b border-slate-100 p-5">
           <h2 className="text-lg font-black">거래 기록</h2>
           <p className="mt-1 text-sm text-slate-500">청산 완료 거래는 실현손익을, 보유 거래는 현재가 기준 미실현손익을 별도로 확인합니다.</p>
@@ -737,6 +948,51 @@ function updateImportRow(rowId: string, key: keyof ImportPreviewRow, value: stri
 
 const chartColors = ["#2563eb", "#14b8a6", "#a855f7", "#6366f1", "#f97316", "#94a3b8"];
 
+function FilterSelect({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode }) {
+  return (
+    <label>
+      <div className="label mb-1.5">{label}</div>
+      <select className="input" value={value} onChange={(event) => onChange(event.target.value)}>
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function MonthlyChip({ label, value, className = "" }: { label: string; value: string; className?: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+      <div className="text-[11px] font-bold text-slate-400">{label}</div>
+      <div className={`mt-0.5 text-sm font-black ${className || "text-slate-800"}`}>{value}</div>
+    </div>
+  );
+}
+
+function SortableHead({
+  label,
+  sortKey,
+  currentKey,
+  direction,
+  onSort,
+  alignRight = false
+}: {
+  label: string;
+  sortKey: RecordSortKey;
+  currentKey: RecordSortKey;
+  direction: SortDirection;
+  onSort: (key: RecordSortKey) => void;
+  alignRight?: boolean;
+}) {
+  const active = currentKey === sortKey;
+  return (
+    <th className={`px-4 py-3 ${alignRight ? "text-right" : "text-left"}`}>
+      <button className={`font-black ${active ? "text-blue-600" : "text-slate-500"}`} type="button" onClick={() => onSort(sortKey)}>
+        {label} {active ? direction === "asc" ? "↑" : "↓" : "↕"}
+      </button>
+    </th>
+  );
+}
+
 function MarketPill({ market, position }: { market?: "spot" | "futures"; position?: PositionHoldingSummary }) {
   const type = position ? getPositionCategory(position) : market === "futures" ? "선물" : "국내ETF";
   const style: Record<string, string> = {
@@ -748,6 +1004,23 @@ function MarketPill({ market, position }: { market?: "spot" | "futures"; positio
   };
   const label = position ? type : market === "futures" ? "선물" : "현물";
   return <span className={`rounded-full px-2 py-1 text-xs font-black ${style[type] ?? "bg-slate-100 text-slate-600"}`}>{label}</span>;
+}
+
+function TradeStatusPill({ trade }: { trade: Trade }) {
+  const open = isOpenTrade(trade);
+  return (
+    <span className={`rounded-full px-2 py-1 text-xs font-black ${open ? "bg-orange-50 text-orange-700" : "bg-green-50 text-green-700"}`}>
+      {open ? "보유 중" : "청산 완료"}
+    </span>
+  );
+}
+
+function PositionPill({ trade }: { trade: Trade }) {
+  const label = trade.marketType === "futures"
+    ? trade.positionSide === "long" ? "롱" : "숏"
+    : trade.positionSide === "long" ? "매수" : "매도";
+  const style = trade.positionSide === "long" ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700";
+  return <span className={`rounded-full px-2 py-1 text-xs font-black ${style}`}>{label}</span>;
 }
 
 function Detail({ label, value, className = "", alignRight = false }: { label: string; value: string; className?: string; alignRight?: boolean }) {
@@ -838,6 +1111,124 @@ function toPositionShare(positions: PositionHoldingSummary[]) {
 
 function toSingleMarketPnlSeries(trades: Trade[], marketType: "spot" | "futures") {
   return buildCumulativePnlSeries(trades.filter((trade) => trade.marketType === marketType));
+}
+
+function isOpenTrade(trade: Trade): boolean {
+  return trade.tradeAction === "entry" && trade.exitPrice === undefined;
+}
+
+function getAvailableMonths(trades: Trade[]): string[] {
+  return Array.from(new Set(trades.map((trade) => trade.tradeDate.slice(0, 7)).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+}
+
+function filterRecordTrades(trades: Trade[], filters: RecordFilters): Trade[] {
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, "0")}`;
+  const query = filters.search.trim().toLowerCase();
+
+  return trades.filter((trade) => {
+    if (filters.market !== "all" && trade.marketType !== filters.market) return false;
+    if (filters.status !== "all" && (filters.status === "open") !== isOpenTrade(trade)) return false;
+    if (!pnlFilterMatches(trade, filters.pnl)) return false;
+    if (!sideFilterMatches(trade, filters.side)) return false;
+    if (!assetFilterMatches(trade, filters.asset)) return false;
+    if (query && !`${trade.instrumentName} ${trade.instrumentCode}`.toLowerCase().includes(query)) return false;
+
+    const tradeMonth = trade.tradeDate.slice(0, 7);
+    if (filters.dateFilter === "this_month" && tradeMonth !== thisMonth) return false;
+    if (filters.dateFilter === "last_month" && tradeMonth !== lastMonth) return false;
+    if (filters.dateFilter === "month" && filters.month && tradeMonth !== filters.month) return false;
+    if (filters.dateFilter === "custom") {
+      if (filters.fromDate && trade.tradeDate < filters.fromDate) return false;
+      if (filters.toDate && trade.tradeDate > filters.toDate) return false;
+    }
+    return true;
+  });
+}
+
+function pnlFilterMatches(trade: Trade, filter: RecordPnlFilter): boolean {
+  if (filter === "all") return true;
+  if (isOpenTrade(trade)) return filter === "zero";
+  if (filter === "profit") return trade.realizedPnl > 0;
+  if (filter === "loss") return trade.realizedPnl < 0;
+  return trade.realizedPnl === 0;
+}
+
+function sideFilterMatches(trade: Trade, filter: RecordSideFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "buy" || filter === "long") return trade.positionSide === "long";
+  return trade.positionSide === "short";
+}
+
+function assetFilterMatches(trade: Trade, filter: RecordAssetFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "futures") return trade.marketType === "futures" || trade.assetType === "index_futures" || trade.assetType === "stock_futures";
+  return trade.assetType === filter;
+}
+
+function sortRecordTrades(trades: Trade[], key: RecordSortKey, direction: SortDirection): Trade[] {
+  const multiplier = direction === "asc" ? 1 : -1;
+  return trades.slice().sort((a, b) => compareRecordTrade(a, b, key) * multiplier);
+}
+
+function compareRecordTrade(a: Trade, b: Trade, key: RecordSortKey): number {
+  if (key === "date") return a.tradeDate.localeCompare(b.tradeDate);
+  if (key === "instrumentName") return a.instrumentName.localeCompare(b.instrumentName);
+  if (key === "marketType") return a.marketType.localeCompare(b.marketType);
+  if (key === "entryPrice") return a.entryPrice - b.entryPrice;
+  if (key === "exitPrice") return (a.exitPrice ?? 0) - (b.exitPrice ?? 0);
+  if (key === "realizedPnl") return a.realizedPnl - b.realizedPnl;
+  return Number(isOpenTrade(a)) - Number(isOpenTrade(b));
+}
+
+function summarizeRecordTrades(trades: Trade[]) {
+  const closed = trades.filter((trade) => !isOpenTrade(trade));
+  const realizedPnl = closed.reduce((sum, trade) => sum + trade.realizedPnl, 0);
+  const spotPnl = closed.filter((trade) => trade.marketType === "spot").reduce((sum, trade) => sum + trade.realizedPnl, 0);
+  const futuresPnl = closed.filter((trade) => trade.marketType === "futures").reduce((sum, trade) => sum + trade.realizedPnl, 0);
+  return {
+    count: trades.length,
+    realizedPnl,
+    spotPnl,
+    futuresPnl,
+    profitCount: closed.filter((trade) => trade.realizedPnl > 0).length,
+    lossCount: closed.filter((trade) => trade.realizedPnl < 0).length,
+    zeroCount: closed.filter((trade) => trade.realizedPnl === 0).length,
+    winRate: calculateWinRate(closed)
+  };
+}
+
+function groupRecordTrades(trades: Trade[]) {
+  const map = new Map<string, Trade[]>();
+  trades.forEach((trade) => {
+    const month = trade.tradeDate.slice(0, 7) || "unknown";
+    map.set(month, [...(map.get(month) ?? []), trade]);
+  });
+  return Array.from(map.entries()).map(([month, monthTrades]) => ({
+    month,
+    trades: monthTrades,
+    summary: summarizeRecordTrades(monthTrades)
+  }));
+}
+
+function formatMonthLabel(month: string): string {
+  const [year, monthNumber] = month.split("-");
+  return `${year}년 ${Number(monthNumber)}월`;
+}
+
+function formatTradeVolume(trade: Trade): string {
+  return trade.marketType === "spot" ? `${formatQuantity(trade.quantity ?? 0)}주` : `${formatQuantity(trade.contractCount ?? 0)}계약`;
+}
+
+function formatEntryPrice(trade: Trade): string {
+  return trade.marketType === "futures" ? `${trade.entryPrice.toLocaleString("ko-KR")}pt` : formatMoney(trade.entryPrice, trade.currency);
+}
+
+function formatExitPrice(trade: Trade): string {
+  if (trade.exitPrice === undefined) return "-";
+  return trade.marketType === "futures" ? `${trade.exitPrice.toLocaleString("ko-KR")}pt` : formatMoney(trade.exitPrice, trade.currency);
 }
 
 function toImportPreviewRow(row: Record<string, string>, index: number, existingTrades: Trade[]): ImportPreviewRow {
