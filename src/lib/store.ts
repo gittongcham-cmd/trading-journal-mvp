@@ -4,7 +4,7 @@ import { withCumulativePnl } from "@/lib/calculations";
 import { withBalanceComparisons } from "@/lib/accountBalances";
 import { getAccessPassword, isAdminMode } from "@/lib/auth";
 import { loadCustomInstruments, saveCustomInstruments } from "@/lib/search";
-import type { AccountBalanceSnapshot, AccountRecord, DailyRuleCheck, EmotionTag, Instrument, InstrumentPrice, Trade, TradingRule } from "@/types/trading";
+import type { AccountBalanceSnapshot, AccountRecord, AppSettings, DailyRuleCheck, EmotionTag, Instrument, InstrumentPrice, Trade, TradingRule } from "@/types/trading";
 
 const TRADES_KEY = "trading-journal-trades-v2-empty-start";
 const ACCOUNTS_KEY = "trading-journal-accounts-v2-empty-start";
@@ -12,6 +12,7 @@ const BALANCE_SNAPSHOTS_KEY = "trading-journal-account-balance-snapshots-v1";
 const INSTRUMENT_PRICES_KEY = "trading-journal-instrument-prices-v1";
 const TRADING_RULES_KEY = "trading-journal-trading-rules-v1";
 const DAILY_RULE_CHECKS_KEY = "trading-journal-daily-rule-checks-v1";
+const APP_SETTINGS_KEY = "trading-journal-app-settings-v1";
 
 const defaultTradingRules: TradingRule[] = [
   "추격매수하지 않는다.",
@@ -72,6 +73,23 @@ export function saveInstrumentPrice(price: InstrumentPrice): Record<string, Inst
   window.localStorage.setItem(INSTRUMENT_PRICES_KEY, JSON.stringify(next));
   void syncLocalStateToCloud();
   return next;
+}
+
+export function loadAppSettings(): AppSettings {
+  if (typeof window === "undefined") return { showGoogleSheetImport: true };
+  const raw = window.localStorage.getItem(APP_SETTINGS_KEY);
+  if (!raw) return { showGoogleSheetImport: true };
+  try {
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    return { showGoogleSheetImport: parsed.showGoogleSheetImport ?? true };
+  } catch {
+    return { showGoogleSheetImport: true };
+  }
+}
+
+export function saveAppSettings(settings: AppSettings): void {
+  window.localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
+  void syncLocalStateToCloud();
 }
 
 export function getLocalDateKey(date = new Date()): string {
@@ -228,6 +246,9 @@ function normalizeTrade(trade: Partial<Trade>): Trade {
     targetPrice: trade.targetPrice,
     emotionTags: emotionTags.length ? emotionTags : ["calm"],
     reviewMemo: trade.reviewMemo ?? "",
+    importSource: trade.importSource,
+    importBatchId: trade.importBatchId,
+    importedAt: trade.importedAt,
     createdAt: trade.createdAt ?? now,
     updatedAt: trade.updatedAt ?? now
   };
@@ -270,6 +291,7 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
   const localCustomInstruments = loadCustomInstruments();
   const localTradingRules = loadTradingRules();
   const localDailyRuleChecks = loadDailyRuleChecks();
+  const localAppSettings = loadAppSettings();
   const response = await fetch("/api/app-data", {
     headers: { "x-app-password": password }
   });
@@ -281,6 +303,7 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
     customInstruments?: Instrument[];
     tradingRules?: TradingRule[];
     dailyRuleChecks?: DailyRuleCheck[];
+    appSettings?: AppSettings;
   };
   const cloudTrades = withCumulativePnl((data.trades ?? []).map(normalizeTrade));
   const cloudBalanceSnapshots = recalculateBalanceSnapshots((data.accountBalanceSnapshots ?? []).map(normalizeBalanceSnapshot));
@@ -288,6 +311,7 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
   const cloudCustomInstruments = data.customInstruments ?? [];
   const cloudTradingRules = (data.tradingRules ?? []).map(normalizeTradingRule).sort((a, b) => a.sortOrder - b.sortOrder);
   const cloudDailyRuleChecks = (data.dailyRuleChecks ?? []).map(normalizeDailyRuleCheck);
+  const cloudAppSettings = data.appSettings;
   const hasCloudPrices = Object.keys(cloudInstrumentPrices).length > 0;
   const shouldSeedCloud =
     isAdminMode() &&
@@ -296,7 +320,8 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
       (!hasCloudPrices && Object.keys(localInstrumentPrices).length > 0) ||
       (cloudCustomInstruments.length === 0 && localCustomInstruments.length > 0) ||
       (cloudTradingRules.length === 0 && localTradingRules.length > 0) ||
-      (cloudDailyRuleChecks.length === 0 && localDailyRuleChecks.length > 0));
+      (cloudDailyRuleChecks.length === 0 && localDailyRuleChecks.length > 0) ||
+      (!cloudAppSettings && localAppSettings.showGoogleSheetImport !== true));
 
   window.localStorage.setItem(TRADES_KEY, JSON.stringify(cloudTrades.length ? cloudTrades : localTrades));
   window.localStorage.setItem(BALANCE_SNAPSHOTS_KEY, JSON.stringify(cloudBalanceSnapshots.length ? cloudBalanceSnapshots : localBalanceSnapshots));
@@ -304,6 +329,7 @@ export async function hydrateLocalStateFromCloud(password: string): Promise<void
   saveCustomInstruments(cloudCustomInstruments.length ? cloudCustomInstruments : localCustomInstruments);
   window.localStorage.setItem(TRADING_RULES_KEY, JSON.stringify(cloudTradingRules.length ? cloudTradingRules : localTradingRules));
   window.localStorage.setItem(DAILY_RULE_CHECKS_KEY, JSON.stringify(cloudDailyRuleChecks.length ? cloudDailyRuleChecks : localDailyRuleChecks));
+  window.localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(cloudAppSettings ?? localAppSettings));
 
   if (shouldSeedCloud) {
     await syncLocalStateToCloud();
@@ -326,7 +352,8 @@ export async function syncLocalStateToCloud(): Promise<boolean> {
       instrumentPrices: loadInstrumentPrices(),
       customInstruments: loadCustomInstruments(),
       tradingRules: loadTradingRules(),
-      dailyRuleChecks: loadDailyRuleChecks()
+      dailyRuleChecks: loadDailyRuleChecks(),
+      appSettings: loadAppSettings()
     })
   }).catch(() => null);
   return Boolean(response?.ok);

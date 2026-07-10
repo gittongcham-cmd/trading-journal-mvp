@@ -8,7 +8,7 @@ import { buildCumulativePnlSeries, calculateFuturesFee, calculateReturnRate, cal
 import { formatKRW, formatPercent, formatSignedKRW, pnlClass } from "@/lib/format";
 import { calculateOpenPositions, summarizeOpenPositions } from "@/lib/holdings";
 import { updateManualPrice } from "@/lib/quotes";
-import { loadInstrumentPrices, loadTrades, saveTrades } from "@/lib/store";
+import { loadAppSettings, loadInstrumentPrices, loadTrades, saveAppSettings, saveTrades } from "@/lib/store";
 import type { Currency, EmotionTag, InstrumentPrice, MarketFilter, PositionHoldingSummary, Trade, TradeAction } from "@/types/trading";
 import { KpiCard } from "@/components/ui/KpiCard";
 
@@ -33,6 +33,24 @@ type ExitDraft = {
   emotionTags: EmotionTag[];
 };
 
+type ImportPreviewRow = {
+  id: string;
+  include: boolean;
+  date: string;
+  instrumentName: string;
+  position: string;
+  contractCount: string;
+  entryPrice: string;
+  exitPrice: string;
+  fee: string;
+  realizedPnl: string;
+  entryReason: string;
+  exitReason: string;
+  memo: string;
+  emotionTags: string;
+  status: string;
+};
+
 export function TradesPage() {
   const admin = isAdminMode();
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -48,12 +66,20 @@ export function TradesPage() {
   const [exitDraft, setExitDraft] = useState<ExitDraft>(createExitDraft());
   const [exitError, setExitError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Trade | null>(null);
+  const [showGoogleSheetImport, setShowGoogleSheetImport] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importRows, setImportRows] = useState<ImportPreviewRow[]>([]);
+  const [hideImportAfterSave, setHideImportAfterSave] = useState(false);
 
   useEffect(() => {
     const loaded = loadTrades();
     setTrades(loaded);
     setSelected(loaded[0] ?? null);
     setPrices(loadInstrumentPrices());
+    setShowGoogleSheetImport(loadAppSettings().showGoogleSheetImport);
   }, []);
 
   const filtered = useMemo(
@@ -229,6 +255,66 @@ export function TradesPage() {
     setDeleteTarget(null);
   }
 
+  async function loadGoogleSheet() {
+    setImporting(true);
+    setImportError("");
+    setImportRows([]);
+    try {
+      const response = await fetch("/api/import/google-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: sheetUrl })
+      });
+      if (!response.ok) throw new Error("failed");
+      const data = (await response.json()) as { rows?: Record<string, string>[] };
+      const previewRows = (data.rows ?? []).map((row, index) => toImportPreviewRow(row, index, trades));
+      setImportRows(previewRows);
+      if (!previewRows.length) {
+        setImportError("가져올 거래내역이 없습니다. 첫 줄 컬럼명과 데이터 행을 확인해 주세요.");
+      }
+    } catch {
+      setImportError("구글시트를 불러오지 못했어요. 시트가 비공개이거나 링크 접근 권한이 없을 수 있어요. 구글시트를 “링크가 있는 사용자 보기 가능”으로 바꾼 뒤 다시 시도해 주세요.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+function updateImportRow(rowId: string, key: keyof ImportPreviewRow, value: string | boolean) {
+    setImportRows((current) => current.map((row) => {
+      if (row.id !== rowId) return row;
+      const next = { ...row, [key]: value } as ImportPreviewRow;
+      const status = getImportStatus(next, trades);
+      return { ...next, status, include: key === "include" ? Boolean(value) : next.include && shouldIncludeImportRow(status) };
+    }));
+  }
+
+  function saveImportedRows() {
+    if (!admin) return;
+    const batchId = `google-sheet-${Date.now()}`;
+    const importedAt = new Date().toISOString();
+    const newTrades = importRows
+      .filter((row) => row.include && shouldIncludeImportRow(row.status))
+      .map((row, index) => toTradeFromImportRow(row, batchId, importedAt, index));
+    if (!newTrades.length) {
+      setImportError("저장할 거래가 없습니다. 미리보기에서 포함할 거래를 확인해 주세요.");
+      return;
+    }
+    saveTrades([...trades, ...newTrades]);
+    const reloaded = loadTrades();
+    setTrades(reloaded);
+    setSelected(reloaded[0] ?? null);
+    if (hideImportAfterSave) {
+      const nextSettings = { ...loadAppSettings(), showGoogleSheetImport: false };
+      saveAppSettings(nextSettings);
+      setShowGoogleSheetImport(false);
+    }
+    setSheetUrl("");
+    setImportRows([]);
+    setImportError("");
+    setHideImportAfterSave(false);
+    setImportOpen(false);
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -237,7 +323,7 @@ export function TradesPage() {
           <p className="mt-1 text-sm text-slate-500">청산 거래의 실현손익과 보유 포지션의 미실현손익을 나눠서 봅니다.</p>
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-secondary" type="button">CSV 업로드</button>
+          {admin && showGoogleSheetImport && <button className="btn btn-secondary" type="button" onClick={() => setImportOpen(true)}>구글시트 불러오기</button>}
           {admin && <Link className="btn btn-primary" href="/trades/new">+ 거래 추가</Link>}
         </div>
       </div>
@@ -478,6 +564,76 @@ export function TradesPage() {
         </div>
       )}
 
+      {importOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="card max-h-[90vh] w-full max-w-6xl overflow-y-auto p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-slate-950">구글시트 불러오기</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-500">
+                  구글시트 URL은 가져오기 때만 사용되고 저장되지 않아요. 첫 줄에는 컬럼명이 있어야 해요.
+                  가져오기 완료 후에는 구글시트 공유 설정을 비공개로 바꿔도 됩니다.
+                </p>
+              </div>
+              <button className="btn btn-secondary" type="button" onClick={() => { setImportOpen(false); setSheetUrl(""); setImportRows([]); setImportError(""); }}>닫기</button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+              <input className="input" value={sheetUrl} onChange={(event) => setSheetUrl(event.target.value)} placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=0" />
+              <button className="btn btn-primary" type="button" onClick={loadGoogleSheet} disabled={importing || !sheetUrl.trim()}>{importing ? "불러오는 중..." : "불러오기"}</button>
+            </div>
+            <div className="mt-3 rounded-xl bg-blue-50 p-3 text-xs font-bold leading-5 text-blue-700">
+              이미 가져온 거래내역은 앱에 저장되어 유지됩니다. 구글시트 URL, spreadsheetId, gid, exportUrl은 저장하지 않습니다.
+            </div>
+            {importError && <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-700">{importError}</div>}
+
+            {importRows.length > 0 && (
+              <>
+                <div className="mt-5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h3 className="text-base font-black text-slate-950">미리보기</h3>
+                    <p className="mt-1 text-sm text-slate-500">중복 의심 또는 오류 행은 기본 제외됩니다. 필요한 값은 저장 전 직접 수정할 수 있어요.</p>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-600">
+                    <input type="checkbox" checked={hideImportAfterSave} onChange={(event) => setHideImportAfterSave(event.target.checked)} />
+                    구글시트 불러오기 버튼 숨기기
+                  </label>
+                </div>
+                <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="min-w-[1500px] w-full text-xs">
+                    <thead className="bg-slate-50 font-black text-slate-500">
+                      <tr>{["포함", "날짜", "종목", "포지션", "계약수", "진입가", "청산가", "수수료", "손익", "상태", "진입이유", "메모"].map((head) => <th key={head} className="px-3 py-2 text-left">{head}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {importRows.map((row) => (
+                        <tr key={row.id} className="border-t border-slate-100">
+                          <td className="px-3 py-2"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, "include", event.target.checked)} disabled={!shouldIncludeImportRow(row.status)} /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.date} onChange={(value) => updateImportRow(row.id, "date", value)} /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.instrumentName} onChange={(value) => updateImportRow(row.id, "instrumentName", value)} /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.position} onChange={(value) => updateImportRow(row.id, "position", value)} /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.contractCount} onChange={(value) => updateImportRow(row.id, "contractCount", value)} alignRight /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.entryPrice} onChange={(value) => updateImportRow(row.id, "entryPrice", value)} alignRight /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.exitPrice} onChange={(value) => updateImportRow(row.id, "exitPrice", value)} alignRight /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.fee} onChange={(value) => updateImportRow(row.id, "fee", value)} alignRight /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.realizedPnl} onChange={(value) => updateImportRow(row.id, "realizedPnl", value)} alignRight /></td>
+                          <td className="px-3 py-2"><StatusBadge status={row.status} /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.entryReason} onChange={(value) => updateImportRow(row.id, "entryReason", value)} /></td>
+                          <td className="px-3 py-2"><ImportInput value={row.memo} onChange={(value) => updateImportRow(row.id, "memo", value)} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button className="btn btn-secondary" type="button" onClick={() => { setImportOpen(false); setSheetUrl(""); setImportRows([]); }}>취소</button>
+                  <button className="btn btn-primary" type="button" onClick={saveImportedRows}>미리보기 항목 저장</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
           <div className="card w-full max-w-md p-5">
@@ -684,6 +840,158 @@ function toSingleMarketPnlSeries(trades: Trade[], marketType: "spot" | "futures"
   return buildCumulativePnlSeries(trades.filter((trade) => trade.marketType === marketType));
 }
 
+function toImportPreviewRow(row: Record<string, string>, index: number, existingTrades: Trade[]): ImportPreviewRow {
+  const preview: ImportPreviewRow = {
+    id: `import-row-${index}-${Date.now()}`,
+    include: true,
+    date: parseSheetDate(getSheetValue(row, ["날짜", "일자", "date"])),
+    instrumentName: getSheetValue(row, ["종목", "종목명", "상품", "instrument"]),
+    position: getSheetValue(row, ["포지션", "매수/매도", "방향", "position"]) || "매수",
+    contractCount: normalizeNumberText(getSheetValue(row, ["계약수", "수량", "contractCount", "quantity"]) || "1"),
+    entryPrice: normalizeNumberText(getSheetValue(row, ["진입가", "진입가격", "entryPrice"])),
+    exitPrice: normalizeNumberText(getSheetValue(row, ["청산가", "청산가격", "exitPrice"])),
+    fee: normalizeNumberText(getSheetValue(row, ["수수료", "fee"])),
+    realizedPnl: normalizeNumberText(getSheetValue(row, ["손익", "실현손익", "pnl", "realizedPnl"])),
+    entryReason: getSheetValue(row, ["진입이유", "진입 이유", "entryReason"]),
+    exitReason: getSheetValue(row, ["청산이유", "청산 이유", "exitReason"]),
+    memo: getSheetValue(row, ["메모", "복기", "reviewMemo"]),
+    emotionTags: getSheetValue(row, ["감정태그", "감정 태그", "emotionTags"]),
+    status: "정상"
+  };
+  const status = getImportStatus(preview, existingTrades);
+  return { ...preview, status, include: shouldIncludeImportRow(status) };
+}
+
+function getSheetValue(row: Record<string, string>, names: string[]): string {
+  const normalized = Object.entries(row).map(([key, value]) => [key.replace(/\s/g, "").toLowerCase(), value] as const);
+  for (const name of names) {
+    const found = normalized.find(([key]) => key === name.replace(/\s/g, "").toLowerCase());
+    if (found) return found[1] ?? "";
+  }
+  return "";
+}
+
+function parseSheetDate(value: string): string {
+  const text = value.trim();
+  if (!text) return "";
+  const match = text.match(/^(\d{4})[.\-/\s]+(\d{1,2})[.\-/\s]+(\d{1,2})/);
+  if (!match) return "";
+  return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+}
+
+function normalizeNumberText(value: string): string {
+  const parsed = parseSheetNumber(value);
+  return parsed === undefined ? "" : new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 6 }).format(parsed);
+}
+
+function parseSheetNumber(value: string): number | undefined {
+  const raw = value.trim();
+  if (!raw) return undefined;
+  const negative = raw.includes("▼") || raw.startsWith("-");
+  const positive = raw.includes("▲");
+  const cleaned = raw.replace(/[▲▼,\s원₩ptPTS]/g, "").replace(/[^\d.-]/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === ".") return undefined;
+  const number = Number(cleaned);
+  if (Number.isNaN(number)) return undefined;
+  if (negative) return -Math.abs(number);
+  if (positive) return Math.abs(number);
+  return number;
+}
+
+function getImportStatus(row: ImportPreviewRow, existingTrades: Trade[]): string {
+  if (!row.date) return "날짜 오류";
+  if (!parseNumber(row.entryPrice)) return "진입가 누락";
+  if (isDuplicateImport(row, existingTrades)) return "중복 의심";
+  if (!parseNumber(row.exitPrice)) return parseNumber(row.realizedPnl) ? "청산가 없음" : "보유 중";
+  return "정상";
+}
+
+function shouldIncludeImportRow(status: string): boolean {
+  return !["날짜 오류", "진입가 누락", "중복 의심"].includes(status);
+}
+
+function isDuplicateImport(row: ImportPreviewRow, existingTrades: Trade[]): boolean {
+  const exitPrice = parseNumber(row.exitPrice);
+  const realizedPnl = parseNumber(row.realizedPnl);
+  const entryPrice = parseNumber(row.entryPrice);
+  return existingTrades.some((trade) =>
+    trade.tradeDate === row.date &&
+    trade.instrumentName === row.instrumentName &&
+    trade.positionSide === toPositionSide(row.position) &&
+    Math.abs(trade.entryPrice - entryPrice) < 0.000001 &&
+    Math.abs((trade.exitPrice ?? 0) - exitPrice) < 0.000001 &&
+    Math.abs(trade.realizedPnl - realizedPnl) < 0.000001
+  );
+}
+
+function toPositionSide(value: string): "long" | "short" {
+  const text = value.toLowerCase();
+  return text.includes("매도") || text.includes("short") || text.includes("숏") ? "short" : "long";
+}
+
+function toTradeFromImportRow(row: ImportPreviewRow, batchId: string, importedAt: string, index: number): Trade {
+  const contractCount = parseNumber(row.contractCount) || 1;
+  const entryPrice = parseNumber(row.entryPrice);
+  const exitPrice = parseNumber(row.exitPrice);
+  const fee = parseNumber(row.fee);
+  const realizedPnl = exitPrice ? parseNumber(row.realizedPnl) : 0;
+  const multiplier = 250000;
+  const tradeAmount = entryPrice * multiplier * contractCount;
+  const now = new Date().toISOString();
+  const instrumentName = row.instrumentName.trim();
+  return {
+    id: `google-sheet-${Date.now()}-${index}`,
+    tradeDate: row.date,
+    marketType: "futures",
+    assetType: "index_futures",
+    instrumentId: `google-sheet-${instrumentName || "futures"}`,
+    instrumentName,
+    instrumentCode: instrumentName || "GOOGLE-SHEET-FUTURES",
+    region: "domestic",
+    currency: "KRW",
+    exchange: "KRX",
+    positionSide: toPositionSide(row.position),
+    tradeAction: exitPrice ? "full_exit" : "entry",
+    entryDate: row.date,
+    entryPrice,
+    exitDate: exitPrice ? row.date : undefined,
+    exitPrice: exitPrice || undefined,
+    contractCount,
+    multiplier,
+    tradeAmount,
+    fee,
+    realizedPnl,
+    unrealizedPnl: 0,
+    cumulativePnl: 0,
+    marketCumulativePnl: 0,
+    returnRate: exitPrice ? calculateReturnRate(realizedPnl, tradeAmount) : 0,
+    entryReason: row.entryReason,
+    exitReason: row.exitReason,
+    emotionTags: parseEmotionTags(row.emotionTags),
+    reviewMemo: row.memo,
+    importSource: "google_sheet",
+    importBatchId: batchId,
+    importedAt,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function parseEmotionTags(value: string): EmotionTag[] {
+  const tags: { key: EmotionTag; labels: string[] }[] = [
+    { key: "confidence", labels: ["자신감", "확신"] },
+    { key: "anxiety", labels: ["불안"] },
+    { key: "impatience", labels: ["조급"] },
+    { key: "greed", labels: ["욕심"] },
+    { key: "fear", labels: ["공포"] },
+    { key: "calm", labels: ["평온", "차분"] },
+    { key: "regret", labels: ["후회"] },
+    { key: "conviction", labels: ["확신"] }
+  ];
+  const matched = tags.filter((tag) => tag.labels.some((label) => value.includes(label))).map((tag) => tag.key);
+  return matched.length ? Array.from(new Set(matched)) : ["calm"];
+}
+
 function getPositionCategory(position: PositionHoldingSummary): string {
   if (position.marketType === "futures") return "선물";
   const overseas = position.currency === "USD" || position.region === "overseas";
@@ -786,6 +1094,21 @@ function ExitPreview({ position, draft }: { position: PositionHoldingSummary; dr
       <KpiCard label="남은 평가금액" value={preview.remainingAmount === undefined ? "현재가 입력 필요" : formatMoney(preview.remainingAmount, position.currency)} caption="현재가 기준 평가용" />
     </div>
   );
+}
+
+function ImportInput({ value, onChange, alignRight = false }: { value: string; onChange: (value: string) => void; alignRight?: boolean }) {
+  return <input className={`input h-9 min-w-28 text-xs ${alignRight ? "text-right" : ""}`} value={value} onChange={(event) => onChange(event.target.value)} />;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const ok = status === "정상";
+  const open = status === "보유 중";
+  const className = ok
+    ? "bg-green-50 text-green-700"
+    : open
+      ? "bg-blue-50 text-blue-700"
+      : "bg-slate-100 text-slate-600";
+  return <span className={`whitespace-nowrap rounded-full px-2 py-1 text-xs font-black ${className}`}>{status}</span>;
 }
 
 function EditInput({ label, value, onChange, type = "text", disabled = false }: { label: string; value: string; onChange: (value: string) => void; type?: string; disabled?: boolean }) {

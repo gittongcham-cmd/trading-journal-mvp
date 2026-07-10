@@ -65,8 +65,15 @@ export interface Trade {
   targetPrice?: number;
   emotionTags: EmotionTag[];
   reviewMemo: string;
+  importSource?: "google_sheet";
+  importBatchId?: string;
+  importedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AppSettings {
+  showGoogleSheetImport: boolean;
 }
 
 export interface AccountRecord {
