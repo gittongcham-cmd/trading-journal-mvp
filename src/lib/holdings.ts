@@ -136,7 +136,7 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
   }>();
 
   trades
-    .filter((trade) => !trade.deletedAt && trade.marketType === "futures")
+    .filter((trade) => !trade.deletedAt && trade.marketType === "futures" && !isStandaloneImportedClosedFuturesTrade(trade))
     .forEach((trade) => {
       const side = trade.positionSide;
       const key = `${trade.instrumentCode}-${side}`;
@@ -211,6 +211,10 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
       };
     })
     .filter((holding) => holding.quantity > 0);
+}
+
+function isStandaloneImportedClosedFuturesTrade(trade: Trade): boolean {
+  return trade.importSource === "google_sheet" && trade.marketType === "futures" && trade.tradeAction !== "entry" && trade.exitPrice !== undefined;
 }
 
 export function summarizeOpenPositions(positions: PositionHoldingSummary[]) {

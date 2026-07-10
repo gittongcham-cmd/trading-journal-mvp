@@ -92,7 +92,7 @@ export function DashboardPage() {
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
-        <ChartCard title="현물 / 선물 총액 비중" description="현재가가 입력된 보유 포지션 금액 기준입니다.">
+        <ChartCard title="현물 / 선물 총액 비중" description="보유 포지션 기준입니다. 선물은 현재가가 없으면 진입가 기준 명목금액으로 계산합니다.">
           {marketAmountShare.length ? (
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>

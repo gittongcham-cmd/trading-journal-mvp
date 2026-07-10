@@ -1173,6 +1173,7 @@ function calculateTradeDisplayStatuses(trades: Trade[]): Map<string, TradeDispla
 
     if (isExitLikeTrade(trade)) {
       statuses.set(trade.id, "closed");
+      if (isStandaloneImportedClosedFuturesTrade(trade)) return;
       let remainingExit = quantity;
       const lots = entryLots.get(key) ?? [];
       for (const lot of lots) {
@@ -1209,6 +1210,10 @@ function tradeQuantity(trade: Trade): number {
 function tradePositionKey(trade: Trade): string {
   const instrument = (trade.instrumentCode || trade.instrumentId || trade.instrumentName).toLowerCase();
   return `${trade.marketType}:${instrument}:${trade.positionSide}`;
+}
+
+function isStandaloneImportedClosedFuturesTrade(trade: Trade): boolean {
+  return trade.importSource === "google_sheet" && trade.marketType === "futures" && trade.tradeAction !== "entry" && trade.exitPrice !== undefined;
 }
 
 function getAvailableMonths(trades: Trade[]): string[] {
