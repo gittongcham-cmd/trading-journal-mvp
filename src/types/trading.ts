@@ -68,6 +68,7 @@ export interface Trade {
   importSource?: "google_sheet";
   importBatchId?: string;
   importedAt?: string;
+  deletedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -39,7 +39,7 @@ export function loadTrades(): Trade[] {
   const raw = window.localStorage.getItem(TRADES_KEY);
   if (!raw) return [];
   try {
-    return withCumulativePnl((JSON.parse(raw) as Partial<Trade>[]).map(normalizeTrade));
+    return withCumulativePnl((JSON.parse(raw) as Partial<Trade>[]).map(normalizeTrade).filter((trade) => !trade.deletedAt));
   } catch {
     return [];
   }
@@ -249,6 +249,7 @@ function normalizeTrade(trade: Partial<Trade>): Trade {
     importSource: trade.importSource,
     importBatchId: trade.importBatchId,
     importedAt: trade.importedAt,
+    deletedAt: trade.deletedAt,
     createdAt: trade.createdAt ?? now,
     updatedAt: trade.updatedAt ?? now
   };

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { sumNegative, sumPositive } from "@/lib/accountBalances";
 import { isAdminMode } from "@/lib/auth";
-import { calculateWinRate } from "@/lib/calculations";
+import { calculateWinRate, getClosedTrades } from "@/lib/calculations";
 import { formatKRW, formatPercent, pnlClass } from "@/lib/format";
 import { calculateOpenPositions, summarizeOpenPositions } from "@/lib/holdings";
 import { loadAccountBalanceSnapshots, loadInstrumentPrices, loadTrades } from "@/lib/store";
@@ -29,7 +29,7 @@ export function DashboardPage() {
   const positions = useMemo(() => calculateOpenPositions(trades, prices), [trades, prices]);
   const positionSummary = useMemo(() => summarizeOpenPositions(positions), [positions]);
   const today = new Date().toISOString().slice(0, 10);
-  const closedTrades = trades.filter((trade) => trade.tradeAction !== "entry" || trade.exitPrice !== undefined);
+  const closedTrades = getClosedTrades(trades);
   const todayRealizedPnl = closedTrades.filter((trade) => trade.tradeDate === today).reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const totalRealizedPnl = sumPnl(closedTrades);
   const spotRealizedPnl = sumPnl(closedTrades.filter((trade) => trade.marketType === "spot"));

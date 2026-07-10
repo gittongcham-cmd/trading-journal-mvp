@@ -16,7 +16,7 @@ export function calculateSpotHoldings(trades: Trade[], prices: Record<string, In
   }>();
 
   trades
-    .filter((trade) => trade.marketType === "spot")
+    .filter((trade) => !trade.deletedAt && trade.marketType === "spot")
     .forEach((trade) => {
       const current = byInstrument.get(trade.instrumentId) ?? {
         instrumentId: trade.instrumentId,
@@ -136,7 +136,7 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
   }>();
 
   trades
-    .filter((trade) => trade.marketType === "futures")
+    .filter((trade) => !trade.deletedAt && trade.marketType === "futures")
     .forEach((trade) => {
       const side = trade.positionSide;
       const key = `${trade.instrumentCode}-${side}`;
@@ -216,7 +216,9 @@ function calculateFuturesHoldings(trades: Trade[], prices: Record<string, Instru
 export function summarizeOpenPositions(positions: PositionHoldingSummary[]) {
   const valued = positions.filter((position) => position.currentAmount !== undefined);
   const spotCurrentAmount = valued.filter((position) => position.marketType === "spot").reduce((sum, position) => sum + (position.currentAmount ?? 0), 0);
-  const futuresCurrentAmount = valued.filter((position) => position.marketType === "futures").reduce((sum, position) => sum + (position.currentAmount ?? 0), 0);
+  const futuresCurrentAmount = positions
+    .filter((position) => position.marketType === "futures")
+    .reduce((sum, position) => sum + (position.currentAmount ?? position.nominalAmount ?? position.investmentAmount), 0);
   const totalInvestmentAmount = positions.filter((position) => position.marketType === "spot").reduce((sum, position) => sum + position.investmentAmount, 0);
   const unrealizedPnl = valued.reduce((sum, position) => sum + (position.unrealizedPnl ?? 0), 0);
   const valuationBase = valued.reduce((sum, position) => sum + position.investmentAmount, 0);

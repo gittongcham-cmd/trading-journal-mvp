@@ -67,6 +67,7 @@ export function withCumulativePnl(trades: Trade[]): Trade[] {
   let spotCumulative = 0;
   let futuresCumulative = 0;
   return trades
+    .filter((trade) => !trade.deletedAt)
     .slice()
     .sort((a, b) => a.tradeDate.localeCompare(b.tradeDate))
     .map((trade) => {
@@ -92,6 +93,7 @@ export function calculateWinRate(trades: Trade[]): number {
 
 export function getClosedTrades(trades: Trade[]): Trade[] {
   return trades.filter((trade) => {
+    if (trade.deletedAt) return false;
     if (trade.tradeAction === "entry") {
       return trade.exitPrice !== undefined;
     }
