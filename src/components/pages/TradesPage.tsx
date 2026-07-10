@@ -108,7 +108,7 @@ export function TradesPage() {
   const [recordAsset, setRecordAsset] = useState<RecordAssetFilter>("all");
   const [recordSortKey, setRecordSortKey] = useState<RecordSortKey>("date");
   const [recordSortDirection, setRecordSortDirection] = useState<SortDirection>("desc");
-  const [collapsedMonths, setCollapsedMonths] = useState<string[]>([]);
+  const [expandedMonths, setExpandedMonths] = useState<string[]>([]);
 
   useEffect(() => {
     const loaded = loadTrades();
@@ -155,6 +155,10 @@ export function TradesPage() {
   const recordGroups = useMemo(() => groupRecordTrades(recordSorted), [recordSorted]);
   const recordSummary = useMemo(() => summarizeRecordTrades(recordFiltered), [recordFiltered]);
 
+  useEffect(() => {
+    setExpandedMonths([]);
+  }, [recordFilters]);
+
   function toggleRecordSort(key: RecordSortKey) {
     if (recordSortKey === key) {
       setRecordSortDirection((current) => current === "asc" ? "desc" : "asc");
@@ -165,7 +169,13 @@ export function TradesPage() {
   }
 
   function toggleRecordMonth(month: string) {
-    setCollapsedMonths((current) => current.includes(month) ? current.filter((item) => item !== month) : [...current, month]);
+    setExpandedMonths((current) => {
+      const isClosing = current.includes(month);
+      if (isClosing && selected?.tradeDate.slice(0, 7) === month) {
+        setSelected(null);
+      }
+      return isClosing ? current.filter((item) => item !== month) : [...current, month];
+    });
   }
 
   function beginPriceEdit(position: PositionHoldingSummary) {
@@ -630,12 +640,12 @@ function updateImportRow(rowId: string, key: keyof ImportPreviewRow, value: stri
             </div>
           )}
           {recordGroups.map((group) => {
-            const collapsed = collapsedMonths.includes(group.month);
+            const expanded = expandedMonths.includes(group.month);
             return (
               <div key={group.month}>
                 <button className="flex w-full flex-col gap-3 bg-white px-5 py-4 text-left hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between" type="button" onClick={() => toggleRecordMonth(group.month)}>
                   <div>
-                    <div className="text-base font-black text-slate-950">{collapsed ? "▶" : "▼"} {formatMonthLabel(group.month)}</div>
+                    <div className="text-base font-black text-slate-950">{expanded ? "▼" : "▶"} {formatMonthLabel(group.month)}</div>
                     <div className="mt-1 text-xs font-bold text-slate-500">월별로 거래를 접고 펼쳐서 볼 수 있어요.</div>
                   </div>
                   <div className="grid gap-2 text-sm sm:grid-cols-5 lg:min-w-[720px]">
@@ -646,7 +656,7 @@ function updateImportRow(rowId: string, key: keyof ImportPreviewRow, value: stri
                     <MonthlyChip label="승률" value={formatPercent(group.summary.winRate)} />
                   </div>
                 </button>
-                {!collapsed && (
+                {expanded && (
                   <div className="overflow-x-auto">
                     <table className="min-w-[1120px] w-full text-sm">
                       <thead className="bg-slate-50 text-xs font-bold text-slate-500">
