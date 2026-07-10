@@ -47,6 +47,7 @@ export function TradesPage() {
   const [closingPosition, setClosingPosition] = useState<PositionHoldingSummary | null>(null);
   const [exitDraft, setExitDraft] = useState<ExitDraft>(createExitDraft());
   const [exitError, setExitError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Trade | null>(null);
 
   useEffect(() => {
     const loaded = loadTrades();
@@ -216,6 +217,16 @@ export function TradesPage() {
     setClosingPosition(null);
     setExitDraft(createExitDraft());
     setExitError("");
+  }
+
+  function deleteTrade() {
+    if (!admin || !deleteTarget) return;
+    const nextTrades = trades.filter((trade) => trade.id !== deleteTarget.id);
+    saveTrades(nextTrades);
+    const reloaded = loadTrades();
+    setTrades(reloaded);
+    setSelected((current) => current?.id === deleteTarget.id ? reloaded[0] ?? null : current);
+    setDeleteTarget(null);
   }
 
   return (
@@ -390,9 +401,9 @@ export function TradesPage() {
           <p className="mt-1 text-sm text-slate-500">청산 완료 거래는 실현손익을, 보유 거래는 현재가 기준 미실현손익을 별도로 확인합니다.</p>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[1840px] w-full text-sm">
+          <table className="min-w-[1940px] w-full text-sm">
             <thead className="bg-slate-50 text-xs font-bold text-slate-500">
-              <tr>{["날짜", "시장", "상품구분", "종목", "종목코드/티커", "통화", "매수/매도", "진입가", "수량", "환율", "거래금액", "현재가", "현재금액", "미실현손익", "평가수익률", "청산가", "실현손익", "메모"].map((head, index) => (
+              <tr>{["날짜", "시장", "상품구분", "종목", "종목코드/티커", "통화", "매수/매도", "진입가", "수량", "환율", "거래금액", "현재가", "현재금액", "미실현손익", "평가수익률", "청산가", "실현손익", "메모", "액션"].map((head, index) => (
                 <th key={head} className={`px-4 py-3 ${index >= 7 && index <= 16 ? "text-right" : "text-left"}`}>{head}</th>
               ))}</tr>
             </thead>
@@ -420,6 +431,20 @@ export function TradesPage() {
                     <td className="px-4 py-3 text-right">{trade.exitPrice === undefined ? "-" : formatMoney(trade.exitPrice, trade.currency)}</td>
                     <td className={`px-4 py-3 text-right font-black ${pnlClass(trade.realizedPnl)}`}>{formatMoney(trade.realizedPnl, trade.currency)}</td>
                     <td className="px-4 py-3">{trade.reviewMemo || trade.entryReason || "-"}</td>
+                    <td className="px-4 py-3">
+                      {admin ? (
+                        <button
+                          className="btn btn-secondary px-3 py-2 text-xs text-blue-600"
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDeleteTarget(trade);
+                          }}
+                        >
+                          삭제
+                        </button>
+                      ) : "-"}
+                    </td>
                   </tr>
                 );
               })}
@@ -449,6 +474,26 @@ export function TradesPage() {
             <Memo label="청산이유" value={selected.exitReason || "-"} />
             <Memo label="감정 태그" value={selected.emotionTags.join(", ")} />
             <Memo label="복기 메모" value={selected.reviewMemo || "-"} />
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="card w-full max-w-md p-5">
+            <h2 className="text-lg font-black text-slate-950">거래 기록을 삭제할까요?</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              삭제된 거래는 매매일지 목록, 실현손익, 누적수익, 승률, 보유 포지션, 그래프, 통계 계산에서 모두 제외됩니다.
+            </p>
+            <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
+              <div className="font-black text-slate-900">{deleteTarget.instrumentName}</div>
+              <div className="mt-1 font-semibold text-slate-500">{deleteTarget.tradeDate} · {deleteTarget.marketType === "futures" ? "선물" : "현물"} · {tradeSideLabel(deleteTarget)}</div>
+              <div className={`mt-2 font-black ${pnlClass(deleteTarget.realizedPnl)}`}>실현손익 {formatMoney(deleteTarget.realizedPnl, deleteTarget.currency)}</div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button className="btn btn-secondary" type="button" onClick={() => setDeleteTarget(null)}>취소</button>
+              <button className="btn btn-primary" type="button" onClick={deleteTrade}>삭제</button>
+            </div>
           </div>
         </div>
       )}
