@@ -53,7 +53,8 @@ type ImportPreviewRow = {
 };
 
 type RecordDateFilter = "all" | "this_month" | "last_month" | "month" | "custom";
-type RecordStatusFilter = "all" | "open" | "closed";
+type TradeDisplayStatus = "open" | "partial_closed" | "closed";
+type RecordStatusFilter = "all" | TradeDisplayStatus;
 type RecordPnlFilter = "all" | "profit" | "loss" | "zero";
 type RecordSideFilter = "all" | "buy" | "sell" | "long" | "short";
 type RecordAssetFilter = "all" | "stock" | "etf" | "futures";
@@ -121,7 +122,7 @@ export function TradesPage() {
     () => trades.filter((trade) => (market === "all" || trade.marketType === market) && `${trade.instrumentName}${trade.instrumentCode}`.toLowerCase().includes(query.toLowerCase())),
     [trades, market, query]
   );
-  const closed = filtered.filter((trade) => trade.tradeAction !== "entry" || trade.exitPrice !== undefined);
+  const closed = filtered.filter(isRealizedPnlTrade);
   const realized = closed.reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const spotPnl = closed.filter((trade) => trade.marketType === "spot").reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const futuresPnl = closed.filter((trade) => trade.marketType === "futures").reduce((sum, trade) => sum + trade.realizedPnl, 0);
@@ -132,6 +133,7 @@ export function TradesPage() {
   const cumulativePnlSeries = useMemo(() => buildCumulativePnlSeries(trades), [trades]);
   const spotPnlSeries = useMemo(() => toSingleMarketPnlSeries(trades, "spot"), [trades]);
   const futuresPnlSeries = useMemo(() => toSingleMarketPnlSeries(trades, "futures"), [trades]);
+  const tradeStatuses = useMemo(() => calculateTradeDisplayStatuses(trades), [trades]);
   const profitTop = useMemo(() => positions.filter((position) => position.unrealizedPnl !== undefined && position.unrealizedPnl > 0).sort((a, b) => (b.unrealizedPnl ?? 0) - (a.unrealizedPnl ?? 0)).slice(0, 5), [positions]);
   const lossTop = useMemo(() => positions.filter((position) => position.unrealizedPnl !== undefined && position.unrealizedPnl < 0).sort((a, b) => (a.unrealizedPnl ?? 0) - (b.unrealizedPnl ?? 0)).slice(0, 5), [positions]);
   const missingPricePositions = positions.filter((position) => position.currentPrice === undefined);
@@ -148,7 +150,7 @@ export function TradesPage() {
     side: recordSide,
     asset: recordAsset
   }), [recordDateFilter, recordMonth, recordFromDate, recordToDate, recordMarket, recordStatus, recordPnl, recordSearch, recordSide, recordAsset]);
-  const recordFiltered = useMemo(() => filterRecordTrades(trades, recordFilters), [trades, recordFilters]);
+  const recordFiltered = useMemo(() => filterRecordTrades(trades, recordFilters, tradeStatuses), [trades, recordFilters, tradeStatuses]);
   const recordSorted = useMemo(() => sortRecordTrades(recordFiltered, recordSortKey, recordSortDirection), [recordFiltered, recordSortKey, recordSortDirection]);
   const recordGroups = useMemo(() => groupRecordTrades(recordSorted), [recordSorted]);
   const recordSummary = useMemo(() => summarizeRecordTrades(recordFiltered), [recordFiltered]);
@@ -584,6 +586,7 @@ function updateImportRow(rowId: string, key: keyof ImportPreviewRow, value: stri
             <FilterSelect label="상태" value={recordStatus} onChange={(value) => setRecordStatus(value as RecordStatusFilter)}>
               <option value="all">전체</option>
               <option value="open">보유 중</option>
+              <option value="partial_closed">부분매도/부분청산</option>
               <option value="closed">청산 완료</option>
             </FilterSelect>
             <FilterSelect label="손익" value={recordPnl} onChange={(value) => setRecordPnl(value as RecordPnlFilter)}>
@@ -671,8 +674,8 @@ function updateImportRow(rowId: string, key: keyof ImportPreviewRow, value: stri
                             <td className="px-4 py-3 text-right font-semibold">{formatEntryPrice(trade)}</td>
                             <td className="px-4 py-3 text-right font-semibold">{trade.exitPrice === undefined ? "-" : formatExitPrice(trade)}</td>
                             <td className="px-4 py-3 text-right font-semibold">{formatTradeVolume(trade)}</td>
-                            <td className={`px-4 py-3 text-right font-black ${isOpenTrade(trade) ? "text-slate-400" : pnlClass(trade.realizedPnl)}`}>{isOpenTrade(trade) ? "-" : formatMoney(trade.realizedPnl, trade.currency)}</td>
-                            <td className="px-4 py-3"><TradeStatusPill trade={trade} /></td>
+                            <td className={`px-4 py-3 text-right font-black ${isRealizedPnlTrade(trade) ? pnlClass(trade.realizedPnl) : "text-slate-400"}`}>{isRealizedPnlTrade(trade) ? formatMoney(trade.realizedPnl, trade.currency) : "-"}</td>
+                            <td className="px-4 py-3"><TradeStatusPill trade={trade} status={tradeStatuses.get(trade.id) ?? getFallbackTradeStatus(trade)} /></td>
                             <td className="max-w-[220px] px-4 py-3"><div className="truncate font-semibold text-slate-600">{trade.reviewMemo || trade.exitReason || trade.entryReason || "-"}</div></td>
                             <td className="px-4 py-3">
                               <div className="flex min-w-44 flex-wrap gap-2">
@@ -1006,11 +1009,14 @@ function MarketPill({ market, position }: { market?: "spot" | "futures"; positio
   return <span className={`rounded-full px-2 py-1 text-xs font-black ${style[type] ?? "bg-slate-100 text-slate-600"}`}>{label}</span>;
 }
 
-function TradeStatusPill({ trade }: { trade: Trade }) {
-  const open = isOpenTrade(trade);
+function TradeStatusPill({ trade, status }: { trade: Trade; status: TradeDisplayStatus }) {
+  const open = status === "open";
+  const partial = status === "partial_closed";
+  const label = open ? "보유 중" : partial ? trade.marketType === "futures" ? "부분청산" : "부분매도" : "청산 완료";
+  const style = open ? "bg-orange-50 text-orange-700" : partial ? "bg-amber-50 text-amber-700" : "bg-green-50 text-green-700";
   return (
-    <span className={`rounded-full px-2 py-1 text-xs font-black ${open ? "bg-orange-50 text-orange-700" : "bg-green-50 text-green-700"}`}>
-      {open ? "보유 중" : "청산 완료"}
+    <span className={`rounded-full px-2 py-1 text-xs font-black ${style}`}>
+      {label}
     </span>
   );
 }
@@ -1113,15 +1119,93 @@ function toSingleMarketPnlSeries(trades: Trade[], marketType: "spot" | "futures"
   return buildCumulativePnlSeries(trades.filter((trade) => trade.marketType === marketType));
 }
 
-function isOpenTrade(trade: Trade): boolean {
-  return trade.tradeAction === "entry" && trade.exitPrice === undefined;
+function getFallbackTradeStatus(trade: Trade): TradeDisplayStatus {
+  if (isExitLikeTrade(trade)) return "closed";
+  if (trade.tradeAction === "entry_exit" || trade.exitPrice !== undefined) return "closed";
+  return "open";
+}
+
+function isOpenTrade(trade: Trade, statuses?: Map<string, TradeDisplayStatus>): boolean {
+  return (statuses?.get(trade.id) ?? getFallbackTradeStatus(trade)) === "open";
+}
+
+function isExitLikeTrade(trade: Trade): boolean {
+  return trade.tradeAction === "exit" || trade.tradeAction === "partial_exit" || trade.tradeAction === "full_exit";
+}
+
+function isRealizedPnlTrade(trade: Trade): boolean {
+  if (trade.tradeAction === "entry") return trade.exitPrice !== undefined;
+  if (trade.tradeAction === "entry_exit") return trade.exitPrice !== undefined || trade.realizedPnl !== 0;
+  return isExitLikeTrade(trade);
+}
+
+function calculateTradeDisplayStatuses(trades: Trade[]): Map<string, TradeDisplayStatus> {
+  const statuses = new Map<string, TradeDisplayStatus>();
+  const entryLots = new Map<string, { id: string; original: number; remaining: number }[]>();
+  const sorted = trades.slice().sort((a, b) => `${a.tradeDate}-${a.createdAt}`.localeCompare(`${b.tradeDate}-${b.createdAt}`));
+
+  sorted.forEach((trade) => {
+    const quantity = tradeQuantity(trade);
+    const key = tradePositionKey(trade);
+
+    if (trade.tradeAction === "entry" && trade.exitPrice === undefined) {
+      const lots = entryLots.get(key) ?? [];
+      lots.push({ id: trade.id, original: quantity, remaining: quantity });
+      entryLots.set(key, lots);
+      statuses.set(trade.id, "open");
+      return;
+    }
+
+    if (trade.tradeAction === "entry_exit" || (trade.tradeAction === "entry" && trade.exitPrice !== undefined)) {
+      statuses.set(trade.id, "closed");
+      return;
+    }
+
+    if (isExitLikeTrade(trade)) {
+      statuses.set(trade.id, "closed");
+      let remainingExit = quantity;
+      const lots = entryLots.get(key) ?? [];
+      for (const lot of lots) {
+        if (remainingExit <= 0) break;
+        const consumed = Math.min(lot.remaining, remainingExit);
+        lot.remaining -= consumed;
+        remainingExit -= consumed;
+      }
+    }
+  });
+
+  entryLots.forEach((lots) => {
+    lots.forEach((lot) => {
+      if (lot.remaining <= 0.0000001) {
+        statuses.set(lot.id, "closed");
+      } else if (lot.remaining < lot.original - 0.0000001) {
+        statuses.set(lot.id, "partial_closed");
+      } else {
+        statuses.set(lot.id, "open");
+      }
+    });
+  });
+
+  trades.forEach((trade) => {
+    if (!statuses.has(trade.id)) statuses.set(trade.id, getFallbackTradeStatus(trade));
+  });
+  return statuses;
+}
+
+function tradeQuantity(trade: Trade): number {
+  return trade.marketType === "futures" ? trade.contractCount ?? 0 : trade.quantity ?? 0;
+}
+
+function tradePositionKey(trade: Trade): string {
+  const instrument = (trade.instrumentCode || trade.instrumentId || trade.instrumentName).toLowerCase();
+  return `${trade.marketType}:${instrument}:${trade.positionSide}`;
 }
 
 function getAvailableMonths(trades: Trade[]): string[] {
   return Array.from(new Set(trades.map((trade) => trade.tradeDate.slice(0, 7)).filter(Boolean))).sort((a, b) => b.localeCompare(a));
 }
 
-function filterRecordTrades(trades: Trade[], filters: RecordFilters): Trade[] {
+function filterRecordTrades(trades: Trade[], filters: RecordFilters, statuses: Map<string, TradeDisplayStatus>): Trade[] {
   const now = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -1130,7 +1214,8 @@ function filterRecordTrades(trades: Trade[], filters: RecordFilters): Trade[] {
 
   return trades.filter((trade) => {
     if (filters.market !== "all" && trade.marketType !== filters.market) return false;
-    if (filters.status !== "all" && (filters.status === "open") !== isOpenTrade(trade)) return false;
+    const status = statuses.get(trade.id) ?? getFallbackTradeStatus(trade);
+    if (filters.status !== "all" && filters.status !== status) return false;
     if (!pnlFilterMatches(trade, filters.pnl)) return false;
     if (!sideFilterMatches(trade, filters.side)) return false;
     if (!assetFilterMatches(trade, filters.asset)) return false;
@@ -1150,7 +1235,7 @@ function filterRecordTrades(trades: Trade[], filters: RecordFilters): Trade[] {
 
 function pnlFilterMatches(trade: Trade, filter: RecordPnlFilter): boolean {
   if (filter === "all") return true;
-  if (isOpenTrade(trade)) return filter === "zero";
+  if (!isRealizedPnlTrade(trade)) return filter === "zero";
   if (filter === "profit") return trade.realizedPnl > 0;
   if (filter === "loss") return trade.realizedPnl < 0;
   return trade.realizedPnl === 0;
@@ -1180,11 +1265,11 @@ function compareRecordTrade(a: Trade, b: Trade, key: RecordSortKey): number {
   if (key === "entryPrice") return a.entryPrice - b.entryPrice;
   if (key === "exitPrice") return (a.exitPrice ?? 0) - (b.exitPrice ?? 0);
   if (key === "realizedPnl") return a.realizedPnl - b.realizedPnl;
-  return Number(isOpenTrade(a)) - Number(isOpenTrade(b));
+  return getFallbackTradeStatus(a).localeCompare(getFallbackTradeStatus(b));
 }
 
 function summarizeRecordTrades(trades: Trade[]) {
-  const closed = trades.filter((trade) => !isOpenTrade(trade));
+  const closed = trades.filter(isRealizedPnlTrade);
   const realizedPnl = closed.reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const spotPnl = closed.filter((trade) => trade.marketType === "spot").reduce((sum, trade) => sum + trade.realizedPnl, 0);
   const futuresPnl = closed.filter((trade) => trade.marketType === "futures").reduce((sum, trade) => sum + trade.realizedPnl, 0);
